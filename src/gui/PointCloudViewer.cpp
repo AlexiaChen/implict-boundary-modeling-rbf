@@ -6,7 +6,7 @@ namespace rbf {
 
 PointCloudViewer::PointCloudViewer(QWidget* parent)
     : QWidget(parent)
-    , viewer_(new pcl::visualization::PCLVisualizer("RBF 隐式边界重建 - 可视化窗口", false))
+    , viewer_(new pcl::visualization::PCLVisualizer("RBF Implicit Boundary - Visualization", true))
 {
     setupUI();
 }
@@ -39,7 +39,7 @@ void PointCloudViewer::showPointCloud(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
     const std::string& id)
 {
-    // 随机颜色
+    // Random color
     pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler(
         cloud,
         static_cast<uint8_t>(rand() % 256),
@@ -51,8 +51,11 @@ void PointCloudViewer::showPointCloud(
         viewer_->addPointCloud<pcl::PointXYZ>(cloud, handler, id);
     }
 
-    // 重置相机以查看点云
+    // Reset camera to view point cloud
     viewer_->resetCamera();
+
+    // Trigger rendering
+    viewer_->spinOnce();
 }
 
 void PointCloudViewer::showMesh(
@@ -63,19 +66,22 @@ void PointCloudViewer::showMesh(
         viewer_->addPolygonMesh(*mesh, id);
     }
 
-    // 设置网格颜色
+    // Set mesh color
     viewer_->setPointCloudRenderingProperties(
         pcl::visualization::PCL_VISUALIZER_COLOR,
-        0.8, 0.6, 0.4,  // 淡棕色
+        0.8, 0.6, 0.4,  // Light brown
         id
     );
 
-    // 设置网格显示方式为面显示
+    // Set representation to surface
     viewer_->setPointCloudRenderingProperties(
         pcl::visualization::PCL_VISUALIZER_REPRESENTATION,
         pcl::visualization::PCL_VISUALIZER_REPRESENTATION_SURFACE,
         id
     );
+
+    // Trigger rendering
+    viewer_->spinOnce();
 }
 
 void PointCloudViewer::clearAll() {
