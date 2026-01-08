@@ -21,18 +21,22 @@ void PointCloudViewer::setupUI() {
     vtkWidget_ = new QVTKOpenGLNativeWidget(this);
     layout->addWidget(vtkWidget_);
 
-    // Get the render window from the widget (using new API)
+    // Get the render window and interactor from the widget
     auto renderWindow = vtkWidget_->renderWindow();
+    auto interactor = vtkWidget_->interactor();
 
     // Create a renderer
     auto renderer = vtkSmartPointer<vtkRenderer>::New();
     renderWindow->AddRenderer(renderer);
 
-    // Create PCL Visualizer with the existing renderer and render window
-    // This embeds PCL directly into the Qt widget
+    // Create PCL Visualizer with existing renderer and render window
+    // Don't create interactor (false), we'll use the widget's existing interactor
     viewer_ = std::make_shared<pcl::visualization::PCLVisualizer>(
         renderer, renderWindow, "RBF Viewer", false
     );
+
+    // Setup the interactor with PCL's interactor style
+    viewer_->setupInteractor(interactor, renderWindow);
 
     // Configure PCL Visualizer
     viewer_->setBackgroundColor(0.1, 0.1, 0.1);
