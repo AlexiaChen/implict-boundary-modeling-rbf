@@ -42,6 +42,7 @@ set(CORE_SOURCES
     src/core/DistanceFunction.cpp
     src/core/RBFInterpolator.cpp
     src/core/MarchingCubes.cpp
+    src/core/LabelInference.cpp
 )
 
 set(IO_SOURCES
@@ -57,6 +58,10 @@ set(MAIN_SOURCES
     src/main.cpp
 )
 
+set(TOOL_SOURCES
+    tools/generate_test_data.cpp
+)
+
 # Qt MOC/UI 处理
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -70,6 +75,11 @@ add_executable(rbf_implicit
     ${MAIN_SOURCES}
 )
 
+# 测试数据生成工具
+add_executable(generate_test_data
+    ${TOOL_SOURCES}
+)
+
 # 链接库
 target_link_libraries(rbf_implicit
     ${PCL_LIBRARIES}
@@ -79,6 +89,8 @@ target_link_libraries(rbf_implicit
     ${BLAS_LIBRARIES}
     ${LAPACK_LIBRARIES}
 )
+
+# 测试数据生成工具只使用标准库，无需链接额外库
 
 # 线程支持 (PCL 需要)
 find_package(Threads REQUIRED)
