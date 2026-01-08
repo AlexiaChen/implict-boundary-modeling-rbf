@@ -92,6 +92,6 @@ target_link_libraries(rbf_implicit
 
 # 测试数据生成工具只使用标准库，无需链接额外库
 
-# 线程支持 (PCL 需要)
+# 线程支持 (PCL 需要，以及我们的后台线程)
 find_package(Threads REQUIRED)
 target_link_libraries(rbf_implicit Threads::Threads)

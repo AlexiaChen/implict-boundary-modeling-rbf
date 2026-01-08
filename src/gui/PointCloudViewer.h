@@ -2,6 +2,7 @@
 #define POINT_CLOUD_VIEWER_H
 
 #include <QWidget>
+#include <QVTKOpenGLNativeWidget.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/PolygonMesh.h>
@@ -11,10 +12,10 @@
 namespace rbf {
 
 /**
- * @brief 点云和网格查看器
+ * @brief Point cloud and mesh viewer embedded in Qt
  *
- * 使用独立的 PCL Visualizer 窗口显示点云和重建的网格
- * 注意：PCL Visualizer 在 VTK 9 中创建独立的渲染窗口
+ * Uses QVTKOpenGLNativeWidget to embed PCL Visualizer directly
+ * into the Qt window for seamless integration.
  */
 class PointCloudViewer : public QWidget {
     Q_OBJECT
@@ -24,7 +25,7 @@ public:
     ~PointCloudViewer();
 
     /**
-     * @brief 显示点云
+     * @brief Display point cloud
      */
     void showPointCloud(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
@@ -32,7 +33,7 @@ public:
     );
 
     /**
-     * @brief 显示网格
+     * @brief Display mesh
      */
     void showMesh(
         const pcl::PolygonMesh::Ptr& mesh,
@@ -40,12 +41,12 @@ public:
     );
 
     /**
-     * @brief 清除所有显示对象
+     * @brief Clear all displayed objects
      */
     void clearAll();
 
     /**
-     * @brief 重置相机视角
+     * @brief Reset camera view
      */
     void resetCamera();
 
@@ -54,6 +55,7 @@ private:
 
 private:
     std::shared_ptr<pcl::visualization::PCLVisualizer> viewer_;
+    QVTKOpenGLNativeWidget* vtkWidget_;
 };
 
 } // namespace rbf

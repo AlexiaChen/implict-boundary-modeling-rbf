@@ -1,12 +1,12 @@
 #include "PointCloudViewer.h"
-#include <QLabel>
 #include <QVBoxLayout>
+#include <vtkRenderer.h>
+#include <vtkRenderWindow.h>
 
 namespace rbf {
 
 PointCloudViewer::PointCloudViewer(QWidget* parent)
     : QWidget(parent)
-    , viewer_(new pcl::visualization::PCLVisualizer("RBF Implicit Boundary - Visualization", true))
 {
     setupUI();
 }
@@ -17,22 +17,26 @@ void PointCloudViewer::setupUI() {
     auto layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
-    // Create a label to inform user
-    auto label = new QLabel("Point cloud and mesh will be displayed\n"
-                           "in a separate PCL Visualizer window", this);
-    label->setAlignment(Qt::AlignCenter);
-    label->setStyleSheet("QLabel { background-color: #f0f0f0; padding: 20px; "
-                         "border: 2px solid #ccc; border-radius: 5px; }");
-    layout->addWidget(label);
+    // Create VTK widget for embedding in Qt
+    vtkWidget_ = new QVTKOpenGLNativeWidget(this);
+    layout->addWidget(vtkWidget_);
+
+    // Get the render window from the widget (using new API)
+    auto renderWindow = vtkWidget_->renderWindow();
+
+    // Create a renderer
+    auto renderer = vtkSmartPointer<vtkRenderer>::New();
+    renderWindow->AddRenderer(renderer);
+
+    // Create PCL Visualizer with the existing renderer and render window
+    // This embeds PCL directly into the Qt widget
+    viewer_ = std::make_shared<pcl::visualization::PCLVisualizer>(
+        renderer, renderWindow, "RBF Viewer", false
+    );
 
     // Configure PCL Visualizer
     viewer_->setBackgroundColor(0.1, 0.1, 0.1);
-    viewer_->addCoordinateSystem(1.0);
     viewer_->initCameraParameters();
-
-    // Show window (PCL Visualizer creates a separate VTK window)
-    viewer_->setShowFPS(true);
-    viewer_->setWindowName("RBF Implicit Boundary - Visualization");
 }
 
 void PointCloudViewer::showPointCloud(
@@ -54,8 +58,8 @@ void PointCloudViewer::showPointCloud(
     // Reset camera to view point cloud
     viewer_->resetCamera();
 
-    // Trigger rendering
-    viewer_->spinOnce();
+    // Trigger render update
+    vtkWidget_->renderWindow()->Render();
 }
 
 void PointCloudViewer::showMesh(
@@ -80,17 +84,19 @@ void PointCloudViewer::showMesh(
         id
     );
 
-    // Trigger rendering
-    viewer_->spinOnce();
+    // Trigger render update
+    vtkWidget_->renderWindow()->Render();
 }
 
 void PointCloudViewer::clearAll() {
     viewer_->removeAllPointClouds();
     viewer_->removeAllShapes();
+    vtkWidget_->renderWindow()->Render();
 }
 
 void PointCloudViewer::resetCamera() {
     viewer_->resetCamera();
+    vtkWidget_->renderWindow()->Render();
 }
 
 } // namespace rbf
