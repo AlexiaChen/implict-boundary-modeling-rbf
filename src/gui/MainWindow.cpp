@@ -14,32 +14,32 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 void MainWindow::setupUI() {
-    setWindowTitle("RBF 隐式边界重建");
+    setWindowTitle("RBF Implicit Boundary Reconstruction");
     resize(1024, 768);
 
-    // 创建中央部件
+    // Create central widget
     QWidget* centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
 
     auto* mainLayout = new QHBoxLayout(centralWidget);
 
-    // 左侧控制面板
+    // Left control panel
     auto* controlPanel = new QWidget;
     controlPanel->setFixedWidth(250);
     auto* controlLayout = new QVBoxLayout(controlPanel);
 
-    // 标题
-    auto* titleLabel = new QLabel("<h2>RBF 隐式边界重建</h2>");
+    // Title
+    auto* titleLabel = new QLabel("<h2>RBF Implicit Boundary</h2>");
     titleLabel->setWordWrap(true);
     controlLayout->addWidget(titleLabel);
 
     controlLayout->addSpacing(20);
 
-    // 按钮
-    btnLoadCloud_ = new QPushButton("加载点云");
-    btnLoadLabels_ = new QPushButton("加载标签");
-    btnRun_ = new QPushButton("运行重建");
-    btnClear_ = new QPushButton("清除");
+    // Buttons
+    btnLoadCloud_ = new QPushButton("Load Point Cloud");
+    btnLoadLabels_ = new QPushButton("Load Labels");
+    btnRun_ = new QPushButton("Run Reconstruction");
+    btnClear_ = new QPushButton("Clear");
 
     btnLoadCloud_->setEnabled(true);
     btnLoadLabels_->setEnabled(false);
@@ -54,31 +54,31 @@ void MainWindow::setupUI() {
 
     controlLayout->addSpacing(20);
 
-    // 状态标签
-    labelStatus_ = new QLabel("状态: 请加载点云数据");
+    // Status label
+    labelStatus_ = new QLabel("Status: Please load point cloud data");
     labelStatus_->setWordWrap(true);
     controlLayout->addWidget(labelStatus_);
 
     controlLayout->addStretch();
 
-    // 说明
+    // Instructions
     auto* infoLabel = new QLabel(
-        "<b>使用说明:</b><br>"
-        "1. 加载点云文件 (PCD/PLY/XYZ)<br>"
-        "2. 加载对应的标签文件<br>"
-        "3. 点击'运行重建'<br>"
-        "4. 查看重建结果"
+        "<b>Instructions:</b><br>"
+        "1. Load point cloud file (PCD/PLY/XYZ)<br>"
+        "2. Load corresponding labels file<br>"
+        "3. Click 'Run Reconstruction'<br>"
+        "4. View results in PCL Visualizer window"
     );
     infoLabel->setWordWrap(true);
     controlLayout->addWidget(infoLabel);
 
-    // 右侧查看器
+    // Right viewer
     viewer_ = new PointCloudViewer;
 
     mainLayout->addWidget(controlPanel);
     mainLayout->addWidget(viewer_, 1);
 
-    // 连接信号
+    // Connect signals
     connect(btnLoadCloud_, &QPushButton::clicked, this, &MainWindow::onLoadPointCloud);
     connect(btnLoadLabels_, &QPushButton::clicked, this, &MainWindow::onLoadLabels);
     connect(btnRun_, &QPushButton::clicked, this, &MainWindow::onRunReconstruction);
@@ -88,9 +88,9 @@ void MainWindow::setupUI() {
 void MainWindow::onLoadPointCloud() {
     QString filename = QFileDialog::getOpenFileName(
         this,
-        "选择点云文件",
+        "Select Point Cloud File",
         "",
-        "点云文件 (*.pcd *.ply *.xyz);;所有文件 (*.*)"
+        "Point Cloud Files (*.pcd *.ply *.xyz);;All Files (*.*)"
     );
 
     if (filename.isEmpty()) {
@@ -101,26 +101,26 @@ void MainWindow::onLoadPointCloud() {
         cloud_ = PointCloudLoader::load(filename.toStdString());
         cloudLoaded_ = true;
 
-        // 显示点云
+        // Show point cloud
         viewer_->showPointCloud(cloud_, "input_cloud");
         labelStatus_->setText(
-            QString("状态: 已加载点云 (%1 个点)\n请加载标签文件").arg(cloud_->size())
+            QString("Status: Loaded %1 points\nPlease load labels file").arg(cloud_->size())
         );
 
         btnLoadLabels_->setEnabled(true);
         btnRun_->setEnabled(false);
 
     } catch (const std::exception& e) {
-        QMessageBox::critical(this, "错误", QString("加载点云失败:\n%1").arg(e.what()));
+        QMessageBox::critical(this, "Error", QString("Failed to load point cloud:\n%1").arg(e.what()));
     }
 }
 
 void MainWindow::onLoadLabels() {
     QString filename = QFileDialog::getOpenFileName(
         this,
-        "选择标签文件",
+        "Select Labels File",
         "",
-        "标签文件 (*.txt *.labels);;所有文件 (*.*)"
+        "Label Files (*.txt *.labels);;All Files (*.*)"
     );
 
     if (filename.isEmpty()) {
@@ -133,8 +133,8 @@ void MainWindow::onLoadLabels() {
         if (labels_.size() != cloud_->size()) {
             QMessageBox::warning(
                 this,
-                "警告",
-                QString("标签数量 (%1) 与点云点数 (%2) 不匹配")
+                "Warning",
+                QString("Label count (%1) does not match point cloud size (%2)")
                     .arg(labels_.size())
                     .arg(cloud_->size())
             );
@@ -143,13 +143,13 @@ void MainWindow::onLoadLabels() {
 
         labelsLoaded_ = true;
         labelStatus_->setText(
-            QString("状态: 已加载点云 (%1 点) 和标签\n可以运行重建").arg(cloud_->size())
+            QString("Status: Loaded %1 points and labels\nReady for reconstruction").arg(cloud_->size())
         );
 
         btnRun_->setEnabled(true);
 
     } catch (const std::exception& e) {
-        QMessageBox::critical(this, "错误", QString("加载标签失败:\n%1").arg(e.what()));
+        QMessageBox::critical(this, "Error", QString("Failed to load labels:\n%1").arg(e.what()));
     }
 }
 
@@ -158,57 +158,57 @@ void MainWindow::onRunReconstruction() {
         return;
     }
 
-    // 显示进度对话框
-    QProgressDialog progress("正在进行 RBF 隐式边界重建...", "取消", 0, 4, this);
-    progress.setWindowTitle("重建中");
+    // Show progress dialog
+    QProgressDialog progress("Running RBF Implicit Boundary Reconstruction...", "Cancel", 0, 4, this);
+    progress.setWindowTitle("Reconstructing");
     progress.setWindowModality(Qt::WindowModal);
     progress.show();
 
     try {
-        // 步骤 1: 计算符号距离函数
+        // Step 1: Compute signed distance function
         progress.setValue(1);
-        progress.setLabelText("计算符号距离函数...");
+        progress.setLabelText("Computing signed distance function...");
         QApplication::processEvents();
 
         std::vector<double> distances = DistanceFunction::compute(cloud_, labels_);
 
-        // 步骤 2: 构建 RBF 插值器
+        // Step 2: Build RBF interpolator
         progress.setValue(2);
-        progress.setLabelText("构建 RBF 插值器...");
+        progress.setLabelText("Building RBF interpolator...");
         QApplication::processEvents();
 
         auto interpolator = std::make_shared<RBFInterpolator>(cloud_, distances, 0.1);
 
         if (!interpolator->solve()) {
-            QMessageBox::critical(this, "错误", "RBF 线性系统求解失败");
+            QMessageBox::critical(this, "Error", "RBF linear system solve failed");
             return;
         }
 
-        // 步骤 3: Marching Cubes 提取边界
+        // Step 3: Marching Cubes extract boundary
         progress.setValue(3);
-        progress.setLabelText("提取边界网格...");
+        progress.setLabelText("Extracting boundary mesh...");
         QApplication::processEvents();
 
         MarchingCubes mc(interpolator, 30);
         pcl::PolygonMesh mesh = mc.extract();
 
-        // 步骤 4: 显示结果
+        // Step 4: Show results
         progress.setValue(4);
-        progress.setLabelText("完成!");
+        progress.setLabelText("Done!");
 
         viewer_->clearAll();
         viewer_->showPointCloud(cloud_, "cloud");
         viewer_->showMesh(std::make_shared<pcl::PolygonMesh>(mesh), "mesh");
 
         labelStatus_->setText(
-            QString("状态: 重建完成!\n点云: %1 点\n网格: %2 三角形")
+            QString("Status: Reconstruction complete!\nPoints: %1\nTriangles: %2")
                 .arg(cloud_->size())
                 .arg(mesh.polygons.size())
         );
 
     } catch (const std::exception& e) {
-        QMessageBox::critical(this, "错误", QString("重建失败:\n%1").arg(e.what()));
-        labelStatus_->setText("状态: 重建失败");
+        QMessageBox::critical(this, "Error", QString("Reconstruction failed:\n%1").arg(e.what()));
+        labelStatus_->setText("Status: Reconstruction failed");
     }
 }
 
@@ -221,7 +221,7 @@ void MainWindow::onClear() {
 
     btnLoadLabels_->setEnabled(false);
     btnRun_->setEnabled(false);
-    labelStatus_->setText("状态: 已清除，请重新加载数据");
+    labelStatus_->setText("Status: Cleared. Please reload data.");
 }
 
 bool MainWindow::haveData() const {

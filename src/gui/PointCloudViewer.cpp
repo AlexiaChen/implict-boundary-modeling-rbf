@@ -17,22 +17,22 @@ void PointCloudViewer::setupUI() {
     auto layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
-    // 创建一个标签提示用户
-    auto label = new QLabel("点云和网格将在独立的 PCL Visualizer 窗口中显示\n"
-                           "窗口标题: 'RBF 隐式边界重建 - 可视化窗口'", this);
+    // Create a label to inform user
+    auto label = new QLabel("Point cloud and mesh will be displayed\n"
+                           "in a separate PCL Visualizer window", this);
     label->setAlignment(Qt::AlignCenter);
     label->setStyleSheet("QLabel { background-color: #f0f0f0; padding: 20px; "
                          "border: 2px solid #ccc; border-radius: 5px; }");
     layout->addWidget(label);
 
-    // 配置 PCL Visualizer
+    // Configure PCL Visualizer
     viewer_->setBackgroundColor(0.1, 0.1, 0.1);
     viewer_->addCoordinateSystem(1.0);
     viewer_->initCameraParameters();
 
-    // 显示窗口（PCL Visualizer 会创建独立的 VTK 窗口）
+    // Show window (PCL Visualizer creates a separate VTK window)
     viewer_->setShowFPS(true);
-    viewer_->setWindowName("RBF 隐式边界重建 - 可视化窗口");
+    viewer_->setWindowName("RBF Implicit Boundary - Visualization");
 }
 
 void PointCloudViewer::showPointCloud(
