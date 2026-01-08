@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include <QProgressDialog>
 #include <QApplication>
+#include <algorithm>
 
 namespace rbf {
 
@@ -9,6 +10,7 @@ MainWindow::MainWindow(QWidget* parent)
     , cloud_(new pcl::PointCloud<pcl::PointXYZ>)
     , cloudLoaded_(false)
     , labelsLoaded_(false)
+    , labelsInferred_(false)
 {
     setupUI();
 }
@@ -54,6 +56,22 @@ void MainWindow::setupUI() {
 
     controlLayout->addSpacing(20);
 
+    // Options group
+    optionsGroup_ = new QGroupBox("Options");
+    auto* optionsLayout = new QVBoxLayout(optionsGroup_);
+
+    checkAutoInfer_ = new QCheckBox("Auto-infer domain labels");
+    checkAutoInfer_->setChecked(true);  // Enable by default
+    checkAutoInfer_->setToolTip(
+        "Automatically infer domain labels from point cloud geometry.\n"
+        "Uses convex hull method: hull points = outer (0), inner points = inner (1).\n\n"
+        "Disable this if you have a separate labels file with ground truth labels."
+    );
+    optionsLayout->addWidget(checkAutoInfer_);
+
+    controlLayout->addWidget(optionsGroup_);
+    controlLayout->addSpacing(10);
+
     // Status label
     labelStatus_ = new QLabel("Status: Please load point cloud data");
     labelStatus_->setWordWrap(true);
@@ -65,9 +83,10 @@ void MainWindow::setupUI() {
     auto* infoLabel = new QLabel(
         "<b>Instructions:</b><br>"
         "1. Load point cloud file (PCD/PLY/XYZ)<br>"
-        "2. Load corresponding labels file<br>"
+        "2. Optionally load labels file, or enable auto-infer<br>"
         "3. Click 'Run Reconstruction'<br>"
-        "4. View results in PCL Visualizer window"
+        "4. View results in PCL Visualizer window<br><br>"
+        "<i>Note: Auto-infer works best for closed objects.</i>"
     );
     infoLabel->setWordWrap(true);
     controlLayout->addWidget(infoLabel);
@@ -101,14 +120,29 @@ void MainWindow::onLoadPointCloud() {
         cloud_ = PointCloudLoader::load(filename.toStdString());
         cloudLoaded_ = true;
 
+        // Reset label state
+        labelsLoaded_ = false;
+        labelsInferred_ = false;
+        labels_.clear();
+
         // Show point cloud
         viewer_->showPointCloud(cloud_, "input_cloud");
-        labelStatus_->setText(
-            QString("Status: Loaded %1 points\nPlease load labels file").arg(cloud_->size())
-        );
 
         btnLoadLabels_->setEnabled(true);
-        btnRun_->setEnabled(false);
+
+        // If auto-infer is enabled, enable Run button
+        if (checkAutoInfer_->isChecked()) {
+            btnRun_->setEnabled(true);
+            labelStatus_->setText(
+                QString("Status: Loaded %1 points\nReady for reconstruction (auto-infer enabled)")
+                    .arg(cloud_->size())
+            );
+        } else {
+            btnRun_->setEnabled(false);
+            labelStatus_->setText(
+                QString("Status: Loaded %1 points\nPlease load labels file").arg(cloud_->size())
+            );
+        }
 
     } catch (const std::exception& e) {
         QMessageBox::critical(this, "Error", QString("Failed to load point cloud:\n%1").arg(e.what()));
@@ -154,7 +188,43 @@ void MainWindow::onLoadLabels() {
 }
 
 void MainWindow::onRunReconstruction() {
-    if (!haveData()) {
+    if (!cloudLoaded_ || cloud_->empty()) {
+        QMessageBox::warning(this, "Warning", "Please load point cloud data first");
+        return;
+    }
+
+    // Auto-infer labels if not loaded
+    if (!labelsLoaded_ && checkAutoInfer_->isChecked()) {
+        try {
+            labelStatus_->setText("Status: Auto-inferring domain labels...");
+            QApplication::processEvents();
+
+            labels_ = LabelInference::infer(cloud_, LabelInference::Method::ConvexHull);
+            labelsLoaded_ = true;
+            labelsInferred_ = true;
+
+            // Count inner and outer points
+            int innerCount = std::count(labels_.begin(), labels_.end(), 1);
+            int outerCount = std::count(labels_.begin(), labels_.end(), 0);
+
+            labelStatus_->setText(
+                QString("Status: Auto-inferred labels\nInner: %1, Outer: %2\nReady for reconstruction")
+                    .arg(innerCount)
+                    .arg(outerCount)
+            );
+        } catch (const std::exception& e) {
+            QMessageBox::critical(
+                this,
+                "Error",
+                QString("Failed to auto-infer labels:\n%1\n\nPlease load labels manually or disable auto-infer.")
+                    .arg(e.what())
+            );
+            return;
+        }
+    }
+
+    if (!labelsLoaded_) {
+        QMessageBox::warning(this, "Warning", "Please load labels file or enable auto-infer");
         return;
     }
 

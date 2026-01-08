@@ -8,12 +8,15 @@
 #include <QLabel>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QCheckBox>
+#include <QGroupBox>
 #include <memory>
 #include "PointCloudViewer.h"
 #include "io/PointCloudLoader.h"
 #include "core/DistanceFunction.h"
 #include "core/RBFInterpolator.h"
 #include "core/MarchingCubes.h"
+#include "core/LabelInference.h"
 
 namespace rbf {
 
@@ -40,19 +43,22 @@ private:
     bool haveData() const;
 
 private:
-    // UI 组件
+    // UI components
     QPushButton* btnLoadCloud_;
     QPushButton* btnLoadLabels_;
     QPushButton* btnRun_;
     QPushButton* btnClear_;
     QLabel* labelStatus_;
+    QCheckBox* checkAutoInfer_;
+    QGroupBox* optionsGroup_;
     PointCloudViewer* viewer_;
 
-    // 数据
+    // Data
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_;
     std::vector<DomainLabel> labels_;
     bool cloudLoaded_;
     bool labelsLoaded_;
+    bool labelsInferred_;  // Track if labels were auto-inferred
 };
 
 } // namespace rbf
