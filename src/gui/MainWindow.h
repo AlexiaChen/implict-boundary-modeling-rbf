@@ -35,7 +35,8 @@ public:
 private slots:
     void onLoadPointCloud();
     void onLoadLabels();
-    void onRunReconstruction();
+    void onRunRBFReconstruction();
+    void onRunPoissonReconstruction();
     void onClear();
 
 private:
@@ -46,7 +47,8 @@ private:
     // UI components
     QPushButton* btnLoadCloud_;
     QPushButton* btnLoadLabels_;
-    QPushButton* btnRun_;
+    QPushButton* btnRunRBF_;
+    QPushButton* btnRunPoisson_;
     QPushButton* btnClear_;
     QLabel* labelStatus_;
     QCheckBox* checkAutoInfer_;

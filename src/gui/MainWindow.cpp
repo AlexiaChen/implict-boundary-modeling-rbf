@@ -2,6 +2,9 @@
 #include <QProgressDialog>
 #include <QApplication>
 #include <algorithm>
+#include <pcl/surface/poisson.h>
+#include <pcl/features/normal_3d.h>
+#include <pcl/surface/vtk_smoothing/vtk_utils.h>
 
 namespace rbf {
 
@@ -40,18 +43,21 @@ void MainWindow::setupUI() {
     // Buttons
     btnLoadCloud_ = new QPushButton("Load Point Cloud");
     btnLoadLabels_ = new QPushButton("Load Labels");
-    btnRun_ = new QPushButton("Run Reconstruction");
+    btnRunRBF_ = new QPushButton("Reconstruct with RBF");
+    btnRunPoisson_ = new QPushButton("Reconstruct with Poisson");
     btnClear_ = new QPushButton("Clear");
 
     btnLoadCloud_->setEnabled(true);
     btnLoadLabels_->setEnabled(false);
-    btnRun_->setEnabled(false);
+    btnRunRBF_->setEnabled(false);
+    btnRunPoisson_->setEnabled(false);
     btnClear_->setEnabled(true);
 
     controlLayout->addWidget(btnLoadCloud_);
     controlLayout->addWidget(btnLoadLabels_);
     controlLayout->addSpacing(10);
-    controlLayout->addWidget(btnRun_);
+    controlLayout->addWidget(btnRunRBF_);
+    controlLayout->addWidget(btnRunPoisson_);
     controlLayout->addWidget(btnClear_);
 
     controlLayout->addSpacing(20);
@@ -100,7 +106,8 @@ void MainWindow::setupUI() {
     // Connect signals
     connect(btnLoadCloud_, &QPushButton::clicked, this, &MainWindow::onLoadPointCloud);
     connect(btnLoadLabels_, &QPushButton::clicked, this, &MainWindow::onLoadLabels);
-    connect(btnRun_, &QPushButton::clicked, this, &MainWindow::onRunReconstruction);
+    connect(btnRunRBF_, &QPushButton::clicked, this, &MainWindow::onRunRBFReconstruction);
+    connect(btnRunPoisson_, &QPushButton::clicked, this, &MainWindow::onRunPoissonReconstruction);
     connect(btnClear_, &QPushButton::clicked, this, &MainWindow::onClear);
 }
 
@@ -130,15 +137,18 @@ void MainWindow::onLoadPointCloud() {
 
         btnLoadLabels_->setEnabled(true);
 
-        // If auto-infer is enabled, enable Run button
+        // Poisson only needs point cloud (with normals estimated internally)
+        btnRunPoisson_->setEnabled(true);
+
+        // If auto-infer is enabled, enable RBF button
         if (checkAutoInfer_->isChecked()) {
-            btnRun_->setEnabled(true);
+            btnRunRBF_->setEnabled(true);
             labelStatus_->setText(
                 QString("Status: Loaded %1 points\nReady for reconstruction (auto-infer enabled)")
                     .arg(cloud_->size())
             );
         } else {
-            btnRun_->setEnabled(false);
+            btnRunRBF_->setEnabled(false);
             labelStatus_->setText(
                 QString("Status: Loaded %1 points\nPlease load labels file").arg(cloud_->size())
             );
@@ -180,14 +190,14 @@ void MainWindow::onLoadLabels() {
             QString("Status: Loaded %1 points and labels\nReady for reconstruction").arg(cloud_->size())
         );
 
-        btnRun_->setEnabled(true);
+        btnRunRBF_->setEnabled(true);
 
     } catch (const std::exception& e) {
         QMessageBox::critical(this, "Error", QString("Failed to load labels:\n%1").arg(e.what()));
     }
 }
 
-void MainWindow::onRunReconstruction() {
+void MainWindow::onRunRBFReconstruction() {
     if (!cloudLoaded_ || cloud_->empty()) {
         QMessageBox::warning(this, "Warning", "Please load point cloud data first");
         return;
@@ -290,12 +300,94 @@ void MainWindow::onClear() {
     labelsLoaded_ = false;
 
     btnLoadLabels_->setEnabled(false);
-    btnRun_->setEnabled(false);
+    btnRunRBF_->setEnabled(false);
+    btnRunPoisson_->setEnabled(false);
     labelStatus_->setText("Status: Cleared. Please reload data.");
 }
 
 bool MainWindow::haveData() const {
     return cloudLoaded_ && labelsLoaded_ && !cloud_->empty();
+}
+
+void MainWindow::onRunPoissonReconstruction() {
+    if (!cloudLoaded_ || cloud_->empty()) {
+        QMessageBox::warning(this, "Warning", "Please load point cloud data first");
+        return;
+    }
+
+    // Show progress dialog
+    QProgressDialog progress("Running Poisson Surface Reconstruction...", "Cancel", 0, 3, this);
+    progress.setWindowTitle("Poisson Reconstruction");
+    progress.setWindowModality(Qt::WindowModal);
+    progress.show();
+
+    try {
+        // Step 1: Estimate normals (required by Poisson)
+        progress.setValue(1);
+        progress.setLabelText("Estimating point cloud normals...");
+        QApplication::processEvents();
+
+        pcl::PointCloud<pcl::PointNormal>::Ptr cloudWithNormals(
+            new pcl::PointCloud<pcl::PointNormal>
+        );
+
+        // Create normal estimation object
+        pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> normalEstimation;
+        normalEstimation.setInputCloud(cloud_);
+
+        // Create KdTree for normal estimation
+        pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(
+            new pcl::search::KdTree<pcl::PointXYZ>()
+        );
+        normalEstimation.setSearchMethod(tree);
+
+        // Use 20 nearest neighbors for normal estimation
+        normalEstimation.setKSearch(20);
+
+        // Estimate normals
+        pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+        normalEstimation.compute(*normals);
+
+        // Concatenate XYZ and normals
+        pcl::concatenateFields(*cloud_, *normals, *cloudWithNormals);
+
+        // Step 2: Run Poisson reconstruction
+        progress.setValue(2);
+        progress.setLabelText("Running Poisson surface reconstruction...");
+        QApplication::processEvents();
+
+        pcl::Poisson<pcl::PointNormal> poisson;
+        poisson.setInputCloud(cloudWithNormals);
+
+        // Set Poisson parameters
+        poisson.setDepth(9);  // Depth of the octree (higher = more detail, slower)
+        // poisson.setSolverDivide(8);
+        // poisson.setIsoDivide(8);
+        // poisson.setSamplesPerNode(1.0);
+        // poisson.setConfidence(false);
+        // poisson.setManifold(false);
+
+        pcl::PolygonMesh mesh;
+        poisson.reconstruct(mesh);
+
+        // Step 3: Show results
+        progress.setValue(3);
+        progress.setLabelText("Done!");
+
+        viewer_->clearAll();
+        viewer_->showPointCloud(cloud_, "cloud");
+        viewer_->showMesh(std::make_shared<pcl::PolygonMesh>(mesh), "poisson_mesh");
+
+        labelStatus_->setText(
+            QString("Status: Poisson reconstruction complete!\nPoints: %1\nTriangles: %2")
+                .arg(cloud_->size())
+                .arg(mesh.polygons.size())
+        );
+
+    } catch (const std::exception& e) {
+        QMessageBox::critical(this, "Error", QString("Poisson reconstruction failed:\n%1").arg(e.what()));
+        labelStatus_->setText("Status: Poisson reconstruction failed");
+    }
 }
 
 } // namespace rbf
