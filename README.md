@@ -1,13 +1,14 @@
 # RBF 隐式边界重建 (RBF Implicit Boundary Reconstruction)
 
-基于径向基函数（RBF）的隐式边界重建算法实现，用于从带标签的点云数据中重建不同域之间的边界曲面。
+基于径向基函数（RBF）的隐式边界重建算法实现
 
 ## 项目概述
 
-本项目实现了论文《利用径向基函数进行隐式边界建模》中的核心算法，包括：
+本项目实现了论文 [《Reconstruction and Representation of 3D Objects with Radial Basis
+Functions》](https://www.cs.jhu.edu/~misha/Fall05/Papers/carr01.pdf)中的核心算法，包括：
 
 - 符号距离函数计算
-- RBF 插值（使用高斯径向基函数）
+- RBF 插值
 - Marching Cubes 等值面提取
 - Qt5 可视化界面
 
@@ -17,7 +18,7 @@
 - **构建系统**: CMake
 - **点云处理库**: PCL 1.14.0
 - **GUI 框架**: Qt5
-- **矩阵运算**: LAPACK (系统 BLAS)
+- **矩阵运算**: Eigen3
 
 ## 依赖库
 
@@ -30,8 +31,8 @@ sudo apt install libpcl-dev pcl-tools
 # Qt5 (GUI 框架，部分组件可能已安装)
 sudo apt install qtbase5-dev
 
-# LAPACK/BLAS (矩阵运算，通常已安装)
-sudo apt install libblas-dev liblapack-dev
+# OpenBLAS 和 Eigen (矩阵运算库)
+sudo apt-get install -y libopenblas-openmp-dev libeigen3-dev
 ```
 
 ## 项目结构
@@ -41,10 +42,7 @@ implict-boundary-rbf/
 ├── CMakeLists.txt                    # 构建配置
 ├── README.md                          # 本文件
 ├── doc/                               # 文档目录
-│   ├── requirement.md                # 需求文档
-│   ├── implict-boundary-with-rbf.md  # RBF 论文翻译
 │   ├── research-report.md            # 研究报告
-│   └── implementation-plan.md        # 实现计划
 ├── src/
 │   ├── core/                         # 核心算法模块
 │   │   ├── DistanceFunction.{h,cpp}     # 符号距离函数计算
