@@ -56,7 +56,7 @@ make -j$(nproc)
 支持点云格式：**PCD**、**PLY**、**XYZ**
 
 测试数据位置：`test/data/`
-- `bunny.pcd` - 兔子点云（约 3 万点）
+- `bunny.pcd` - 斯坦福半边的兔子点云
 - `ism_test_cat.pcd` - 猫点云
 
 ### 运行程序
