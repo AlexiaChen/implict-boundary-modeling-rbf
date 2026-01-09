@@ -1,68 +1,108 @@
 #include "RBFInterpolator.h"
 #include <cmath>
-#include <cstring>
 #include <stdexcept>
-
-// LAPACK 函数声明 (用于求解线性方程组)
-extern "C" {
-    // DGESV: 求解一般线性系统 AX = B
-    void dgesv_(
-        int* n,           // 矩阵阶数
-        int* nrhs,        // 右侧向量数量
-        double* A,        // 系数矩阵
-        int* lda,         // A 的 leading dimension
-        int* ipiv,        // pivot 索引
-        double* B,        // 右侧向量/解向量
-        int* ldb,         // B 的 leading dimension
-        int* info         // 返回信息
-    );
-}
+#include <Eigen/Dense>
 
 namespace rbf {
 
 RBFInterpolator::RBFInterpolator(
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr& centers,
     const std::vector<double>& distanceValues,
-    double epsilon)
-    : cloud_(cloud)
+    RBFFunction rbfType)
+    : centers_(centers)
     , distanceValues_(distanceValues)
-    , weights_()
-    , epsilon_(epsilon)
+    , lambda_()
+    , polyCoeffs_(4, 0.0)
+    , rbfType_(rbfType)
     , solved_(false)
 {
-    if (!cloud || cloud->empty()) {
-        throw std::invalid_argument("Cloud is null or empty");
+    if (!centers || centers->empty()) {
+        throw std::invalid_argument("Centers cloud is null or empty");
     }
 
-    if (distanceValues.size() != cloud->size()) {
+    if (distanceValues.size() != centers->size()) {
         throw std::invalid_argument(
-            "Distance values size must match cloud size"
+            "Distance values size must match centers size"
         );
     }
 
-    weights_.resize(cloud->size());
+    lambda_.resize(centers->size());
 }
 
 RBFInterpolator::~RBFInterpolator() = default;
 
 bool RBFInterpolator::solve() {
-    int n = static_cast<int>(cloud_->size());
+    int n = static_cast<int>(centers_->size());
+    int augN = n + 4;  // 增广系统大小 (N+4) × (N+4)
 
-    // 构建 RBF 矩阵 A (N x N, 按列优先存储)
-    std::vector<double> A(n * n);
-    buildMatrix(A, n);
+    // 使用 Eigen 构建并求解增广线性系统
+    // ┌   A    P ┐ ┌ λ ┐   ┌ f ┐
+    // │          │ │   │ = │   │
+    // └  P^T    0 ┘ ┌ c ┐   ┌ 0 ┘
 
-    // 准备右侧向量 b (distanceValues 的副本)
-    std::vector<double> b(distanceValues_);
+    // 构建增广矩阵 A_aug = [A P; P^T 0]
+    Eigen::MatrixXd A_aug(augN, augN);
 
-    // 使用 LAPACK 求解 AX = b
-    bool success = solveLinearSystem(A, b, weights_, n);
+    // 构建 A 部分 (左上角 N×N)
+    for (int j = 0; j < n; ++j) {
+        for (int i = 0; i < n; ++i) {
+            const auto& pi = centers_->points[i];
+            const auto& pj = centers_->points[j];
 
-    if (success) {
-        solved_ = true;
+            double dx = pi.x - pj.x;
+            double dy = pi.y - pj.y;
+            double dz = pi.z - pj.z;
+            double r = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+            A_aug(i, j) = polyharmonicRBF(r);
+        }
     }
 
-    return solved_;
+    // 构建 P 部分 (右上角 N×4) 和 P^T 部分 (左下角 4×N)
+    for (int i = 0; i < n; ++i) {
+        const auto& p = centers_->points[i];
+
+        // P_i1 = 1, P_i2 = x_i, P_i3 = y_i, P_i4 = z_i
+        A_aug(i, n + 0) = 1.0;
+        A_aug(i, n + 1) = p.x;
+        A_aug(i, n + 2) = p.y;
+        A_aug(i, n + 3) = p.z;
+
+        // P^T - 对称填充
+        A_aug(n + 0, i) = 1.0;
+        A_aug(n + 1, i) = p.x;
+        A_aug(n + 2, i) = p.y;
+        A_aug(n + 3, i) = p.z;
+    }
+
+    // 右下角 4×4 零矩阵（Eigen默认初始化为0）
+
+    // 构建右侧向量 b_aug = [f; 0]
+    Eigen::VectorXd b_aug(augN);
+    for (int i = 0; i < n; ++i) {
+        b_aug(i) = distanceValues_[i];
+    }
+    // 多项式约束右侧为 0
+    b_aug(n) = 0.0;
+    b_aug(n + 1) = 0.0;
+    b_aug(n + 2) = 0.0;
+    b_aug(n + 3) = 0.0;
+
+    // 使用 Eigen 的 PartialPivLU 求解器（支持多线程）
+    Eigen::VectorXd x_aug = A_aug.partialPivLu().solve(b_aug);
+
+    // 提取解向量 x_aug = [λ; c]
+    // 前 N 个是 RBF 权重
+    for (int i = 0; i < n; ++i) {
+        lambda_[i] = x_aug(i);
+    }
+    // 后 4 个是多项式系数
+    for (int i = 0; i < 4; ++i) {
+        polyCoeffs_[i] = x_aug(n + i);
+    }
+
+    solved_ = true;
+    return true;
 }
 
 double RBFInterpolator::evaluate(const pcl::PointXYZ& point) const {
@@ -72,49 +112,54 @@ double RBFInterpolator::evaluate(const pcl::PointXYZ& point) const {
         );
     }
 
+    // s(x) = Σ λ_i * φ(||x - c_i||) + p(x)
     double sum = 0.0;
 
-    // s(u) = Σ w_i * φ(r(u, u_i))
-    for (size_t i = 0; i < cloud_->size(); ++i) {
-        const auto& cloudPoint = cloud_->points[i];
+    // RBF 部分: Σ λ_i * φ(||x - c_i||)
+    for (size_t i = 0; i < centers_->size(); ++i) {
+        const auto& center = centers_->points[i];
 
         // 计算欧几里得距离
-        double dx = point.x - cloudPoint.x;
-        double dy = point.y - cloudPoint.y;
-        double dz = point.z - cloudPoint.z;
+        double dx = point.x - center.x;
+        double dy = point.y - center.y;
+        double dz = point.z - center.z;
         double r = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-        // 高斯 RBF: φ(r) = exp(-ε² * r²)
-        sum += weights_[i] * gaussianRBF(r);
+        // 多谐波 RBF
+        sum += lambda_[i] * polyharmonicRBF(r);
     }
+
+    // 多项式部分: p(x) = c_0 + c_1*x + c_2*y + c_3*z
+    sum += evaluatePolynomial(point);
 
     return sum;
 }
 
-double RBFInterpolator::gaussianRBF(double r) const {
-    // φ(r) = exp(-ε² * r²)
-    double eps_r = epsilon_ * r;
-    return std::exp(-eps_r * eps_r);
+double RBFInterpolator::polyharmonicRBF(double r) const {
+    // 多谐波 RBF:
+    // Linear (双谐波): φ(r) = r
+    // Cubic (三谐波): φ(r) = r³
+    switch (rbfType_) {
+        case RBFFunction::Linear:
+            return r;
+        case RBFFunction::Cubic:
+            return r * r * r;
+        default:
+            return r;
+    }
 }
 
-void RBFInterpolator::buildMatrix(std::vector<double>& A, int n) const {
-    // 构建 RBF 矩阵: A_ij = φ(||u_i - u_j||)
-    // 按列优先存储 (Fortran 风格，用于 LAPACK)
-    for (int j = 0; j < n; ++j) {
-        for (int i = 0; i < n; ++i) {
-            // 计算点 i 和点 j 之间的距离
-            const auto& pi = cloud_->points[i];
-            const auto& pj = cloud_->points[j];
+void RBFInterpolator::buildAugmentedMatrix(std::vector<double>& A, int n) const {
+    // 此函数不再需要，使用Eigen直接构建矩阵
+    // 保留接口以避免编译错误
+}
 
-            double dx = pi.x - pj.x;
-            double dy = pi.y - pj.y;
-            double dz = pi.z - pj.z;
-            double r = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-            // A_ij = φ(r) = exp(-ε² * r²)
-            A[j * n + i] = gaussianRBF(r);
-        }
-    }
+double RBFInterpolator::evaluatePolynomial(const pcl::PointXYZ& point) const {
+    // p(x) = c_0 + c_1*x + c_2*y + c_3*z
+    return polyCoeffs_[0] +
+           polyCoeffs_[1] * point.x +
+           polyCoeffs_[2] * point.y +
+           polyCoeffs_[3] * point.z;
 }
 
 bool RBFInterpolator::solveLinearSystem(
@@ -123,29 +168,8 @@ bool RBFInterpolator::solveLinearSystem(
     std::vector<double>& x,
     int n) const
 {
-    // 准备 LAPACK 求解
-    std::vector<double> A_copy = A;  // DGESV 会修改 A
-    std::vector<double> b_copy = b;  // DGESV 会把解写入 b
-
-    int nrhs = 1;        // 右侧向量数量
-    int lda = n;         // A 的 leading dimension
-    int ldb = n;         // B 的 leading dimension
-    int info = 0;        // 返回信息
-
-    std::vector<int> ipiv(n);  // pivot 索引数组
-
-    // 调用 LAPACK 的 DGESV 求解 AX = b
-    dgesv_(&n, &nrhs, A_copy.data(), &lda, ipiv.data(),
-           b_copy.data(), &ldb, &info);
-
-    if (info != 0) {
-        // info < 0: 参数错误
-        // info > 0: 矩阵奇异
-        return false;
-    }
-
-    // 解在 b_copy 中
-    x = b_copy;
+    // 此函数不再需要，使用Eigen直接求解
+    // 保留接口以避免编译错误
     return true;
 }
 

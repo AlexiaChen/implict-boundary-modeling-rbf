@@ -51,31 +51,6 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr PointCloudLoader::load(const std::string& fi
     return cloud;
 }
 
-bool PointCloudLoader::loadWithLabels(
-    const std::string& cloudFile,
-    const std::string& labelFile,
-    pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
-    std::vector<DomainLabel>& labels)
-{
-    try {
-        cloud = load(cloudFile);
-        labels = loadLabels(labelFile);
-
-        if (labels.size() != cloud->size()) {
-            throw std::runtime_error(
-                "Label count (" + std::to_string(labels.size()) +
-                ") does not match point cloud size (" +
-                std::to_string(cloud->size()) + ")"
-            );
-        }
-
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Error loading point cloud with labels: " << e.what() << std::endl;
-        return false;
-    }
-}
-
 bool PointCloudLoader::save(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
     const std::string& filename)
@@ -100,37 +75,6 @@ bool PointCloudLoader::save(
     }
 
     return false;
-}
-
-std::vector<DomainLabel> PointCloudLoader::loadLabels(const std::string& filename) {
-    std::vector<DomainLabel> labels;
-    std::ifstream file(filename);
-
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open label file: " + filename);
-    }
-
-    std::string line;
-    while (std::getline(file, line)) {
-        if (line.empty() || line[0] == '#') {
-            continue;  // 跳过空行和注释
-        }
-
-        std::istringstream iss(line);
-        int label;
-        if (iss >> label) {
-            if (label == 0 || label == 1) {
-                labels.push_back(label);
-            } else {
-                throw std::runtime_error(
-                    "Invalid label value: " + std::to_string(label) +
-                    " (expected 0 or 1)"
-                );
-            }
-        }
-    }
-
-    return labels;
 }
 
 } // namespace rbf

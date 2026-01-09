@@ -18,10 +18,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # 查找依赖库
 find_package(PCL 1.8 REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Core Widgets OpenGL)
-
-# 使用标准 BLAS/LAPACK (用户可替换为 OpenBLAS)
-find_package(BLAS REQUIRED)
-find_package(LAPACK REQUIRED)
+find_package(Eigen3 REQUIRED)  # 用于线性代数运算
 
 # PCL 的 C++11/14 设置
 add_definitions(${PCL_DEFINITIONS})
@@ -86,8 +83,6 @@ target_link_libraries(rbf_implicit
     Qt5::Core
     Qt5::Widgets
     Qt5::OpenGL
-    ${BLAS_LIBRARIES}
-    ${LAPACK_LIBRARIES}
 )
 
 # 测试数据生成工具只使用标准库，无需链接额外库

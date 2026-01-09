@@ -338,10 +338,36 @@ pcl::PolygonMesh MarchingCubes::extract() {
 }
 
 void MarchingCubes::computeBoundingBox() {
-    // 假设插值器有对应的点云，计算其包围盒
-    // 这里我们设置一个默认包围盒，实际应用中应该从点云计算
-    minBound_ = Eigen::Vector3f(-10, -10, -10);
-    maxBound_ = Eigen::Vector3f(10, 10, 10);
+    // 从中心点云计算实际的包围盒
+    auto cloud = interpolator_->getCenters();
+
+    if (cloud && !cloud->empty()) {
+        // 初始化为第一个点
+        minBound_ = Eigen::Vector3f(cloud->points[0].x, cloud->points[0].y, cloud->points[0].z);
+        maxBound_ = minBound_;
+
+        // 找到真实的边界
+        for (const auto& point : cloud->points) {
+            minBound_[0] = std::min(minBound_[0], point.x);
+            minBound_[1] = std::min(minBound_[1], point.y);
+            minBound_[2] = std::min(minBound_[2], point.z);
+
+            maxBound_[0] = std::max(maxBound_[0], point.x);
+            maxBound_[1] = std::max(maxBound_[1], point.y);
+            maxBound_[2] = std::max(maxBound_[2], point.z);
+        }
+
+        // 扩展边界框 10%，避免边界问题
+        Eigen::Vector3f center = (maxBound_ + minBound_) / 2.0f;
+        Eigen::Vector3f extent = (maxBound_ - minBound_) * 0.55f;  // 10% 扩展 = 1.1 / 2 = 0.55
+
+        minBound_ = center - extent;
+        maxBound_ = center + extent;
+    } else {
+        // 如果没有点云，使用默认值
+        minBound_ = Eigen::Vector3f(-1, -1, -1);
+        maxBound_ = Eigen::Vector3f(1, 1, 1);
+    }
 
     voxelSize_ = (maxBound_ - minBound_) / static_cast<float>(resolution_ - 1);
 }

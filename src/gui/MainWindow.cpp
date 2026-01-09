@@ -12,14 +12,12 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , cloud_(new pcl::PointCloud<pcl::PointXYZ>)
     , cloudLoaded_(false)
-    , labelsLoaded_(false)
-    , labelsInferred_(false)
 {
     setupUI();
 }
 
 void MainWindow::setupUI() {
-    setWindowTitle("RBF Implicit Boundary Reconstruction");
+    setWindowTitle("RBF 3D Surface Reconstruction");
     resize(1024, 768);
 
     // Create central widget
@@ -34,7 +32,7 @@ void MainWindow::setupUI() {
     auto* controlLayout = new QVBoxLayout(controlPanel);
 
     // Title
-    auto* titleLabel = new QLabel("<h2>RBF Implicit Boundary</h2>");
+    auto* titleLabel = new QLabel("<h2>RBF 3D Reconstruction</h2>");
     titleLabel->setWordWrap(true);
     controlLayout->addWidget(titleLabel);
 
@@ -42,41 +40,22 @@ void MainWindow::setupUI() {
 
     // Buttons
     btnLoadCloud_ = new QPushButton("Load Point Cloud");
-    btnLoadLabels_ = new QPushButton("Load Labels");
     btnRunRBF_ = new QPushButton("Reconstruct with RBF");
     btnRunPoisson_ = new QPushButton("Reconstruct with Poisson");
     btnClear_ = new QPushButton("Clear");
 
     btnLoadCloud_->setEnabled(true);
-    btnLoadLabels_->setEnabled(false);
     btnRunRBF_->setEnabled(false);
     btnRunPoisson_->setEnabled(false);
     btnClear_->setEnabled(true);
 
     controlLayout->addWidget(btnLoadCloud_);
-    controlLayout->addWidget(btnLoadLabels_);
     controlLayout->addSpacing(10);
     controlLayout->addWidget(btnRunRBF_);
     controlLayout->addWidget(btnRunPoisson_);
     controlLayout->addWidget(btnClear_);
 
     controlLayout->addSpacing(20);
-
-    // Options group
-    optionsGroup_ = new QGroupBox("Options");
-    auto* optionsLayout = new QVBoxLayout(optionsGroup_);
-
-    checkAutoInfer_ = new QCheckBox("Auto-infer domain labels");
-    checkAutoInfer_->setChecked(true);  // Enable by default
-    checkAutoInfer_->setToolTip(
-        "Automatically infer domain labels from point cloud geometry.\n"
-        "Uses convex hull method: hull points = outer (0), inner points = inner (1).\n\n"
-        "Disable this if you have a separate labels file with ground truth labels."
-    );
-    optionsLayout->addWidget(checkAutoInfer_);
-
-    controlLayout->addWidget(optionsGroup_);
-    controlLayout->addSpacing(10);
 
     // Status label
     labelStatus_ = new QLabel("Status: Please load point cloud data");
@@ -89,10 +68,10 @@ void MainWindow::setupUI() {
     auto* infoLabel = new QLabel(
         "<b>Instructions:</b><br>"
         "1. Load point cloud file (PCD/PLY/XYZ)<br>"
-        "2. Optionally load labels file, or enable auto-infer<br>"
-        "3. Click 'Run Reconstruction'<br>"
-        "4. View results in PCL Visualizer window<br><br>"
-        "<i>Note: Auto-infer works best for closed objects.</i>"
+        "2. Click 'Reconstruct with RBF' or 'Reconstruct with Poisson'<br>"
+        "3. View results in PCL Visualizer window<br><br>"
+        "<i><b>RBF Method:</b> Based on Carr et al. paper<br>"
+        "Uses polyharmonic RBF with off-surface points.</i>"
     );
     infoLabel->setWordWrap(true);
     controlLayout->addWidget(infoLabel);
@@ -105,7 +84,6 @@ void MainWindow::setupUI() {
 
     // Connect signals
     connect(btnLoadCloud_, &QPushButton::clicked, this, &MainWindow::onLoadPointCloud);
-    connect(btnLoadLabels_, &QPushButton::clicked, this, &MainWindow::onLoadLabels);
     connect(btnRunRBF_, &QPushButton::clicked, this, &MainWindow::onRunRBFReconstruction);
     connect(btnRunPoisson_, &QPushButton::clicked, this, &MainWindow::onRunPoissonReconstruction);
     connect(btnClear_, &QPushButton::clicked, this, &MainWindow::onClear);
@@ -127,73 +105,18 @@ void MainWindow::onLoadPointCloud() {
         cloud_ = PointCloudLoader::load(filename.toStdString());
         cloudLoaded_ = true;
 
-        // Reset label state
-        labelsLoaded_ = false;
-        labelsInferred_ = false;
-        labels_.clear();
-
         // Show point cloud
         viewer_->showPointCloud(cloud_, "input_cloud");
 
-        btnLoadLabels_->setEnabled(true);
-
-        // Poisson only needs point cloud (with normals estimated internally)
+        btnRunRBF_->setEnabled(true);
         btnRunPoisson_->setEnabled(true);
 
-        // If auto-infer is enabled, enable RBF button
-        if (checkAutoInfer_->isChecked()) {
-            btnRunRBF_->setEnabled(true);
-            labelStatus_->setText(
-                QString("Status: Loaded %1 points\nReady for reconstruction (auto-infer enabled)")
-                    .arg(cloud_->size())
-            );
-        } else {
-            btnRunRBF_->setEnabled(false);
-            labelStatus_->setText(
-                QString("Status: Loaded %1 points\nPlease load labels file").arg(cloud_->size())
-            );
-        }
+        labelStatus_->setText(
+            QString("Status: Loaded %1 points\nReady for reconstruction").arg(cloud_->size())
+        );
 
     } catch (const std::exception& e) {
         QMessageBox::critical(this, "Error", QString("Failed to load point cloud:\n%1").arg(e.what()));
-    }
-}
-
-void MainWindow::onLoadLabels() {
-    QString filename = QFileDialog::getOpenFileName(
-        this,
-        "Select Labels File",
-        "",
-        "Label Files (*.txt *.labels);;All Files (*.*)"
-    );
-
-    if (filename.isEmpty()) {
-        return;
-    }
-
-    try {
-        labels_ = PointCloudLoader::loadLabels(filename.toStdString());
-
-        if (labels_.size() != cloud_->size()) {
-            QMessageBox::warning(
-                this,
-                "Warning",
-                QString("Label count (%1) does not match point cloud size (%2)")
-                    .arg(labels_.size())
-                    .arg(cloud_->size())
-            );
-            return;
-        }
-
-        labelsLoaded_ = true;
-        labelStatus_->setText(
-            QString("Status: Loaded %1 points and labels\nReady for reconstruction").arg(cloud_->size())
-        );
-
-        btnRunRBF_->setEnabled(true);
-
-    } catch (const std::exception& e) {
-        QMessageBox::critical(this, "Error", QString("Failed to load labels:\n%1").arg(e.what()));
     }
 }
 
@@ -203,110 +126,122 @@ void MainWindow::onRunRBFReconstruction() {
         return;
     }
 
-    // Auto-infer labels if not loaded
-    if (!labelsLoaded_ && checkAutoInfer_->isChecked()) {
-        try {
-            labelStatus_->setText("Status: Auto-inferring domain labels...");
-            QApplication::processEvents();
-
-            labels_ = LabelInference::infer(cloud_, LabelInference::Method::ConvexHull);
-            labelsLoaded_ = true;
-            labelsInferred_ = true;
-
-            // Count inner and outer points
-            int innerCount = std::count(labels_.begin(), labels_.end(), 1);
-            int outerCount = std::count(labels_.begin(), labels_.end(), 0);
-
-            labelStatus_->setText(
-                QString("Status: Auto-inferred labels\nInner: %1, Outer: %2\nReady for reconstruction")
-                    .arg(innerCount)
-                    .arg(outerCount)
-            );
-        } catch (const std::exception& e) {
-            QMessageBox::critical(
-                this,
-                "Error",
-                QString("Failed to auto-infer labels:\n%1\n\nPlease load labels manually or disable auto-infer.")
-                    .arg(e.what())
-            );
-            return;
-        }
-    }
-
-    if (!labelsLoaded_) {
-        QMessageBox::warning(this, "Warning", "Please load labels file or enable auto-infer");
-        return;
-    }
-
     // Show progress dialog
-    QProgressDialog progress("Running RBF Implicit Boundary Reconstruction...", "Cancel", 0, 4, this);
-    progress.setWindowTitle("Reconstructing");
+    QProgressDialog progress("Running RBF Surface Reconstruction...", "Cancel", 0, 5, this);
+    progress.setWindowTitle("RBF Reconstruction");
     progress.setWindowModality(Qt::WindowModal);
     progress.show();
 
     try {
-        // Step 1: Compute signed distance function
+        // Step 1: Estimate normals
         progress.setValue(1);
-        progress.setLabelText("Computing signed distance function...");
+        progress.setLabelText("Estimating normals...");
         QApplication::processEvents();
 
-        std::vector<double> distances = DistanceFunction::compute(cloud_, labels_);
+        int kSearch = 30;
+        auto normals = DistanceFunction::estimateNormals(cloud_, kSearch);
 
-        // Step 2: Build RBF interpolator
+        // Orient normals (all pointing outward)
+        DistanceFunction::orientNormals(cloud_, normals);
+
+        labelStatus_->setText("Status: Normals estimated and oriented");
+
+        // Step 2: Generate off-surface points
         progress.setValue(2);
+        progress.setLabelText("Generating off-surface points...");
+        QApplication::processEvents();
+
+        double bboxDiagonal = DistanceFunction::computeBoundingBoxDiagonal(cloud_);
+        double offsetDistance = 0.01 * bboxDiagonal;
+
+        auto offSurfacePoints = DistanceFunction::generateOffSurfacePoints(
+            cloud_, normals, offsetDistance
+        );
+
+        labelStatus_->setText(
+            QString("Status: Generated %1 off-surface points").arg(offSurfacePoints.size())
+        );
+
+        // Step 3: Build RBF interpolator
+        progress.setValue(3);
         progress.setLabelText("Building RBF interpolator...");
         QApplication::processEvents();
 
-        auto interpolator = std::make_shared<RBFInterpolator>(cloud_, distances, 0.1);
+        // Create point cloud from off-surface points
+        pcl::PointCloud<pcl::PointXYZ>::Ptr centers(new pcl::PointCloud<pcl::PointXYZ>);
+        centers->resize(offSurfacePoints.size());
+        for (size_t i = 0; i < offSurfacePoints.size(); ++i) {
+            centers->points[i] = offSurfacePoints[i].position;
+        }
+
+        // Extract distance values
+        std::vector<double> distanceValues;
+        distanceValues.reserve(offSurfacePoints.size());
+        for (const auto& osp : offSurfacePoints) {
+            distanceValues.push_back(osp.distanceValue);
+        }
+
+        // Create RBF interpolator with polyharmonic RBF
+        auto interpolator = std::make_shared<RBFInterpolator>(
+            centers,
+            distanceValues,
+            RBFInterpolator::RBFFunction::Linear  // φ(r) = r
+        );
+
+        labelStatus_->setText(
+            QString("Status: Solving (%1x%2) linear system...")
+                .arg(centers->size() + 4)
+                .arg(centers->size() + 4)
+        );
+        QApplication::processEvents();
 
         if (!interpolator->solve()) {
             QMessageBox::critical(this, "Error", "RBF linear system solve failed");
             return;
         }
 
-        // Step 3: Marching Cubes extract boundary
-        progress.setValue(3);
-        progress.setLabelText("Extracting boundary mesh...");
+        labelStatus_->setText("Status: RBF solved successfully");
+
+        // Step 4: Marching Cubes extract boundary
+        progress.setValue(4);
+        progress.setLabelText("Extracting isosurface...");
         QApplication::processEvents();
 
         MarchingCubes mc(interpolator, 80);
         pcl::PolygonMesh mesh = mc.extract();
 
-        // Step 4: Show results
-        progress.setValue(4);
+        // Step 5: Show results
+        progress.setValue(5);
         progress.setLabelText("Done!");
 
         viewer_->clearAll();
         viewer_->showPointCloud(cloud_, "cloud");
-        viewer_->showMesh(std::make_shared<pcl::PolygonMesh>(mesh), "mesh");
+        viewer_->showMesh(std::make_shared<pcl::PolygonMesh>(mesh), "rbf_mesh");
 
         labelStatus_->setText(
-            QString("Status: Reconstruction complete!\nPoints: %1\nTriangles: %2")
+            QString("Status: RBF reconstruction complete!\nPoints: %1\nTriangles: %2")
                 .arg(cloud_->size())
                 .arg(mesh.polygons.size())
         );
 
     } catch (const std::exception& e) {
-        QMessageBox::critical(this, "Error", QString("Reconstruction failed:\n%1").arg(e.what()));
-        labelStatus_->setText("Status: Reconstruction failed");
+        QMessageBox::critical(this, "Error", QString("RBF reconstruction failed:\n%1").arg(e.what()));
+        labelStatus_->setText("Status: RBF reconstruction failed");
     }
 }
 
 void MainWindow::onClear() {
     viewer_->clearAll();
     cloud_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
-    labels_.clear();
     cloudLoaded_ = false;
-    labelsLoaded_ = false;
 
-    btnLoadLabels_->setEnabled(false);
     btnRunRBF_->setEnabled(false);
     btnRunPoisson_->setEnabled(false);
     labelStatus_->setText("Status: Cleared. Please reload data.");
 }
 
 bool MainWindow::haveData() const {
-    return cloudLoaded_ && labelsLoaded_ && !cloud_->empty();
+    return cloudLoaded_ && !cloud_->empty();
 }
 
 void MainWindow::onRunPoissonReconstruction() {
@@ -341,14 +276,14 @@ void MainWindow::onRunPoissonReconstruction() {
         );
         normalEstimation.setSearchMethod(tree);
 
-        // 增加邻居数来改善法向量估计，特别对密度不均的区域
-        normalEstimation.setKSearch(50);  // 从 30 增加到 50
+        // Increase neighbor count for better normal estimation
+        normalEstimation.setKSearch(50);
 
         // Estimate normals
         pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
         normalEstimation.compute(*normals);
 
-        // 计算点云中心
+        // Calculate centroid
         pcl::PointXYZ centroid(0, 0, 0);
         for (const auto& point : cloud_->points) {
             centroid.x += point.x;
@@ -359,7 +294,7 @@ void MainWindow::onRunPoissonReconstruction() {
         centroid.y /= cloud_->size();
         centroid.z /= cloud_->size();
 
-        // 一致化法向量方向（所有法向量朝外）
+        // Orient normals (all pointing outward)
         for (size_t i = 0; i < normals->size(); ++i) {
             Eigen::Vector3f normal(
                 normals->points[i].normal_x,
@@ -372,7 +307,7 @@ void MainWindow::onRunPoissonReconstruction() {
                 cloud_->points[i].z - centroid.z
             );
 
-            // 如果法向量与"从中心指向点"方向相反，翻转法向量
+            // If normal points inward, flip it
             if (normal.dot(centroidToPoint) < 0) {
                 normals->points[i].normal_x *= -1;
                 normals->points[i].normal_y *= -1;
@@ -391,14 +326,14 @@ void MainWindow::onRunPoissonReconstruction() {
         pcl::Poisson<pcl::PointNormal> poisson;
         poisson.setInputCloud(cloudWithNormals);
 
-        // 调整 Poisson 参数来桥接间隙
+        // Adjust Poisson parameters
         poisson.setDepth(11);
         poisson.setSolverDivide(8);
         poisson.setIsoDivide(8);
-        poisson.setSamplesPerNode(1.2);  // 降低采样密度，让表面更平滑
-        poisson.setConfidence(false);    // 关闭置信度，让算法更激进地桥接间隙
-        poisson.setManifold(false);      // 关闭流形约束，允许非流形连接
-        poisson.setOutputPolygons(false); // 输出三角网格
+        poisson.setSamplesPerNode(1.2);
+        poisson.setConfidence(false);
+        poisson.setManifold(false);
+        poisson.setOutputPolygons(false);
 
         pcl::PolygonMesh mesh;
         poisson.reconstruct(mesh);

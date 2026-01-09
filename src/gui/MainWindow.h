@@ -8,7 +8,6 @@
 #include <QLabel>
 #include <QFileDialog>
 #include <QMessageBox>
-#include <QCheckBox>
 #include <QGroupBox>
 #include <memory>
 #include "PointCloudViewer.h"
@@ -16,14 +15,19 @@
 #include "core/DistanceFunction.h"
 #include "core/RBFInterpolator.h"
 #include "core/MarchingCubes.h"
-#include "core/LabelInference.h"
 
 namespace rbf {
 
 /**
  * @brief 主窗口
  *
- * 提供点云加载、RBF 重建和结果显示功能
+ * 提供点云加载、RBF重建（基于新论文）和Poisson重建功能
+ *
+ * RBF重建流程（基于论文《使用径向基函数（RBF）重建和表示三维物体》）：
+ * 1. 自动估计法向量
+ * 2. 自动生成离面点（沿法线投影）
+ * 3. 构建多谐波RBF插值器
+ * 4. Marching Cubes提取等值面
  */
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -34,7 +38,6 @@ public:
 
 private slots:
     void onLoadPointCloud();
-    void onLoadLabels();
     void onRunRBFReconstruction();
     void onRunPoissonReconstruction();
     void onClear();
@@ -46,21 +49,15 @@ private:
 private:
     // UI components
     QPushButton* btnLoadCloud_;
-    QPushButton* btnLoadLabels_;
     QPushButton* btnRunRBF_;
     QPushButton* btnRunPoisson_;
     QPushButton* btnClear_;
     QLabel* labelStatus_;
-    QCheckBox* checkAutoInfer_;
-    QGroupBox* optionsGroup_;
     PointCloudViewer* viewer_;
 
     // Data
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_;
-    std::vector<DomainLabel> labels_;
     bool cloudLoaded_;
-    bool labelsLoaded_;
-    bool labelsInferred_;  // Track if labels were auto-inferred
 };
 
 } // namespace rbf

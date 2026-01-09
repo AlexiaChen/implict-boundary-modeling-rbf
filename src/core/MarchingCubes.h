@@ -25,7 +25,7 @@ public:
      */
     MarchingCubes(
         const std::shared_ptr<RBFInterpolator>& interpolator,
-        int resolution = 50
+        int resolution = 100
     );
 
     ~MarchingCubes() = default;
