@@ -17,6 +17,21 @@
 - **RBF 重建**：基于多谐波 RBF 的隐式表面重建
 - **Poisson 重建**：基于泊松方程的表面重建（PCL 实现）
 
+## 运行截图
+
+![bunny原始PCD](doc/image/raw_bunny_pcd.png)
+
+bunny原始PCD
+
+![Poisson重建结果](doc/image/poisson_reconstruct.png)
+
+Poisson重建结果
+
+![RBF重建结果](doc/image/rbf_reconstruct.png)
+
+RBF重建结果
+
+
 ## 技术栈
 
 - **语言**: C++
