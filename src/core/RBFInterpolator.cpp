@@ -2,6 +2,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <Eigen/Dense>
+#include <QString>
 
 namespace rbf {
 
@@ -15,6 +16,7 @@ RBFInterpolator::RBFInterpolator(
     , polyCoeffs_(4, 0.0)
     , rbfType_(rbfType)
     , solved_(false)
+    , progressCallback_(nullptr)
 {
     if (!centers || centers->empty()) {
         throw std::invalid_argument("Centers cloud is null or empty");
@@ -43,7 +45,12 @@ bool RBFInterpolator::solve() {
     // 构建增广矩阵 A_aug = [A P; P^T 0]
     Eigen::MatrixXd A_aug(augN, augN);
 
-    // 构建 A 部分 (左上角 N×N)
+    // 进度报告：开始构建A矩阵 (0-30%)
+    if (progressCallback_) {
+        progressCallback_(0, 100, "Building RBF matrix A...");
+    }
+
+    // 构建 A 部分 (左上角 N×N) - 这是最耗时的双重循环
     for (int j = 0; j < n; ++j) {
         for (int i = 0; i < n; ++i) {
             const auto& pi = centers_->points[i];
@@ -56,9 +63,24 @@ bool RBFInterpolator::solve() {
 
             A_aug(i, j) = polyharmonicRBF(r);
         }
+
+        // 每10%报告一次进度
+        if (progressCallback_ && (j % std::max(1, n / 10)) == 0) {
+            int progress = static_cast<int>(30.0 * j / n);
+            progressCallback_(
+                progress,
+                100,
+                QString("Building matrix A: %1/%2").arg(j).arg(n).toStdString()
+            );
+        }
     }
 
-    // 构建 P 部分 (右上角 N×4) 和 P^T 部分 (左下角 4×N)
+    // 进度报告：A矩阵完成 (30%)
+    if (progressCallback_) {
+        progressCallback_(30, 100, "Matrix A complete, adding P matrix...");
+    }
+
+    // 构建 P 部分 (右上角 N×4) 和 P^T 部分 (左下角 4×N) - 30-40%
     for (int i = 0; i < n; ++i) {
         const auto& p = centers_->points[i];
 
@@ -73,11 +95,26 @@ bool RBFInterpolator::solve() {
         A_aug(n + 1, i) = p.x;
         A_aug(n + 2, i) = p.y;
         A_aug(n + 3, i) = p.z;
+
+        // 每25%报告一次进度
+        if (progressCallback_ && (i % std::max(1, n / 4)) == 0) {
+            int progress = 30 + static_cast<int>(10.0 * i / n);
+            progressCallback_(
+                progress,
+                100,
+                QString("Adding P matrix: %1/%2").arg(i).arg(n).toStdString()
+            );
+        }
+    }
+
+    // 进度报告：矩阵构建完成 (40%)
+    if (progressCallback_) {
+        progressCallback_(40, 100, "Matrix complete, building RHS vector...");
     }
 
     // 右下角 4×4 零矩阵（Eigen默认初始化为0）
 
-    // 构建右侧向量 b_aug = [f; 0]
+    // 构建右侧向量 b_aug = [f; 0] - 40-45%
     Eigen::VectorXd b_aug(augN);
     for (int i = 0; i < n; ++i) {
         b_aug(i) = distanceValues_[i];
@@ -88,8 +125,18 @@ bool RBFInterpolator::solve() {
     b_aug(n + 2) = 0.0;
     b_aug(n + 3) = 0.0;
 
+    // 进度报告：开始LU分解 (45-100%)
+    if (progressCallback_) {
+        progressCallback_(45, 100, "Starting LU decomposition (this may take a while)...");
+    }
+
     // 使用 Eigen 的 PartialPivLU 求解器（支持多线程）
     Eigen::VectorXd x_aug = A_aug.partialPivLu().solve(b_aug);
+
+    // 进度报告：求解完成 (100%)
+    if (progressCallback_) {
+        progressCallback_(100, 100, "Linear system solved!");
+    }
 
     // 提取解向量 x_aug = [λ; c]
     // 前 N 个是 RBF 权重

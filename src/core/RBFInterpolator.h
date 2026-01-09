@@ -5,6 +5,7 @@
 #include <pcl/point_types.h>
 #include <vector>
 #include <memory>
+#include <functional>
 
 namespace rbf {
 
@@ -29,6 +30,15 @@ namespace rbf {
 class RBFInterpolator {
 public:
     /**
+     * @brief 进度回调函数类型
+     *
+     * @param current 当前进度 (0-100)
+     * @param total 总进度 (100)
+     * @param message 进度消息
+     */
+    using ProgressCallback = std::function<void(int current, int total, const std::string& message)>;
+
+    /**
      * @brief RBF 函数类型
      */
     enum class RBFFunction {
@@ -50,6 +60,13 @@ public:
     );
 
     ~RBFInterpolator();
+
+    /**
+     * @brief 设置进度回调函数
+     *
+     * @param callback 进度回调函数
+     */
+    void setProgressCallback(ProgressCallback callback) { progressCallback_ = callback; }
 
     /**
      * @brief 求解增广线性系统
@@ -153,6 +170,7 @@ private:
     std::vector<double> polyCoeffs_;                  // 多项式系数 (4个)
     RBFFunction rbfType_;                             // RBF 类型
     bool solved_;                                     // 是否已求解
+    ProgressCallback progressCallback_;                // 进度回调函数
 };
 
 } // namespace rbf
