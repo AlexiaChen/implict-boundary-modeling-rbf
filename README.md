@@ -1,23 +1,20 @@
-# RBF 隐式边界重建 (RBF Implicit Boundary Reconstruction)
+# RBF 3D 表面重建 (RBF 3D Surface Reconstruction)
 
-基于径向基函数（RBF）的隐式边界重建算法实现
+基于径向基函数（RBF）的 3D 点云表面重建算法实现
 
 ## 项目概述
 
-本项目实现了论文 [《Reconstruction and Representation of 3D Objects with Radial Basis
-Functions》](https://www.cs.jhu.edu/~misha/Fall05/Papers/carr01.pdf)中的核心算法，包括：
+本项目实现了论文 [《Reconstruction and Representation of 3D Objects with Radial Basis Functions》](https://www.cs.jhu.edu/~misha/Fall05/Papers/carr01.pdf)（J.C. Carr et al., SIGGRAPH 2001）中的核心算法，提供两种重建方法供对比：
 
-- 符号距离函数计算
-- RBF 插值
-- Marching Cubes 等值面提取
-- Qt5 可视化界面
+- **RBF 重建**：基于多谐波 RBF 的隐式表面重建
+- **Poisson 重建**：基于泊松方程的表面重建（PCL 实现）
 
 ## 技术栈
 
 - **语言**: C++14
-- **构建系统**: CMake
-- **点云处理库**: PCL 1.14.0
-- **GUI 框架**: Qt5
+- **构建系统**: CMake 3.16+
+- **点云处理**: PCL 1.8+
+- **GUI**: Qt5
 - **矩阵运算**: Eigen3
 
 ## 依赖库
@@ -28,12 +25,106 @@ Functions》](https://www.cs.jhu.edu/~misha/Fall05/Papers/carr01.pdf)中的核�
 # PCL (点云库)
 sudo apt install libpcl-dev pcl-tools
 
-# Qt5 (GUI 框架，部分组件可能已安装)
+# Qt5 (GUI 框架)
 sudo apt install qtbase5-dev
 
-# OpenBLAS 和 Eigen (矩阵运算库)
-sudo apt-get install -y libopenblas-openmp-dev libeigen3-dev
+# Eigen3 (矩阵运算库)
+sudo apt install libeigen3-dev
 ```
+
+## 编译说明
+
+```bash
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+./bin/rbf_implicit
+```
+
+## 使用说明
+
+### 准备数据
+
+支持点云格式：**PCD**、**PLY**、**XYZ**
+
+测试数据位置：`test/data/`
+- `bunny.pcd` - 兔子点云（约 3 万点）
+- `ism_test_cat.pcd` - 猫点云
+
+### 运行程序
+
+1. 点击 **"Load Point Cloud"** 加载点云文件
+2. 选择重建方法：
+   - **"Reconstruct with RBF"** - RBF 3D 重建
+   - **"Reconstruct with Poisson"** - Poisson 重建（对比）
+3. 查看重建结果
+
+### 界面功能
+
+- **Load Point Cloud**: 加载点云文件
+- **Reconstruct with RBF**: 执行 RBF 3D 表面重建
+- **Reconstruct with Poisson**: 执行 Poisson 表面重建
+- **Clear**: 清除所有数据
+
+## RBF vs Poisson 对比
+
+### 核心差异
+
+| 特性 | RBF | Poisson |
+|-----|-----|---------|
+| **理论基础** | 全局插值，能量最小化 | 泊松方程重建 |
+| **数学形式** | 隐式函数 s(x) = 0 | 等值面提取 |
+| **输入要求** | 点云 + 法向量（自动估计） | 点云 + 法向量（自动估计） |
+| **离面点** | 需要（沿法线投影生成） | 不需要 |
+| **矩阵类型** | 稠密矩阵 (N+4)×(N+4) | 稀疏八叉树 |
+| **求解器** | LU 分解（Eigen 多线程） | 稀疏求解器 |
+| **计算复杂度** | O(N³) | O(N log N) |
+
+### 优缺点对比
+
+#### RBF 方法
+
+**优点**：
+- ✅ **最光滑插值**：能量最小化理论保证
+- ✅ **孔洞修复能力强**：能够平滑填充大范围缺失数据
+- ✅ **非均匀采样适应性好**：对稀疏和不规则数据鲁棒
+- ✅ **法线可解析计算**：隐式函数梯度直接给出法线
+- ✅ **全局一致性好**：单一函数表示整个物体
+- ✅ **拓扑保持**：生成封闭、水密的流形网格
+
+**缺点**：
+- ❌ **计算慢**：O(N³) 复杂度，大规模数据不可行
+- ❌ **内存占用大**：稠密矩阵需要 O(N²) 内存
+- ❌ **数据规模限制**：基础版本仅支持 < 5000 点
+- ❌ **矩阵可能病态**：某些配置下条件数过大
+
+**适用场景**：
+- 小规模点云（< 5000 点）
+- 需要高质量光滑表面
+- 有大孔洞需要修复
+- 非均匀采样数据
+
+#### Poisson 方法
+
+**优点**：
+- ✅ **计算速度快**：O(N log N) 复杂度
+- ✅ **内存效率高**：稀疏矩阵，内存占用小
+- ✅ **支持大规模数据**：可处理数十万点
+- ✅ **实现成熟**：PCL 内置，经过广泛测试
+- ✅ **可调分辨率**：通过 depth 参数控制细节
+
+**缺点**：
+- ❌ **孔洞修复能力有限**：倾向于封闭所有孔洞
+- ❌ **过度平滑**：可能丢失尖锐特征
+- ❌ **参数敏感**：depth、samplesPerNode 等参数影响结果
+- ❌ **细节丢失**：低深度设置下丢失细节
+- ❌ **法线质量依赖强**：错误的法线导致明显伪影
+
+**适用场景**：
+- 中大规模点云（> 5000 点）
+- 需要快速重建
+- 完整扫描数据（无大孔洞）
+- 实时应用
 
 ## 项目结构
 
@@ -41,187 +132,57 @@ sudo apt-get install -y libopenblas-openmp-dev libeigen3-dev
 implict-boundary-rbf/
 ├── CMakeLists.txt                    # 构建配置
 ├── README.md                          # 本文件
-├── doc/                               # 文档目录
-│   ├── research-report.md            # 研究报告
+├── doc/                               # 论文文档
+│   ├── 3d-reconstruct-with-rbf.md     # RBF 3D 重建论文
+│   └── research-report.md             # 研究报告
 ├── src/
-│   ├── core/                         # 核心算法模块
-│   │   ├── DistanceFunction.{h,cpp}     # 符号距离函数计算
-│   │   ├── RBFInterpolator.{h,cpp}      # RBF 插值器
-│   │   └── MarchingCubes.{h,cpp}        # 等值面提取
-│   ├── io/                           # 点云 I/O 模块
-│   │   └── PointCloudLoader.{h,cpp}     # 文件加载器
-│   ├── gui/                          # Qt5 可视化界面
-│   │   ├── MainWindow.{h,cpp}           # 主窗口
-│   │   └── PointCloudViewer.{h,cpp}     # PCL Visualizer 封装
-│   └── main.cpp                      # 程序入口
-└── build/                            # 构建目录（运行 CMake 后生成）
-    └── bin/
-        └── rbf_implicit              # 可执行文件
+│   ├── core/                          # 核心算法
+│   │   ├── DistanceFunction.{h,cpp}   # 法向量估计和离面点生成
+│   │   ├── RBFInterpolator.{h,cpp}    # RBF 插值器（多谐波 RBF）
+│   │   └── MarchingCubes.{h,cpp}      # 等值面提取
+│   ├── io/                            # 文件 I/O
+│   │   └── PointCloudLoader.{h,cpp}   # 点云加载器
+│   ├── gui/                           # GUI 界面
+│   │   ├── MainWindow.{h,cpp}         # 主窗口
+│   │   └── PointCloudViewer.{h,cpp}   # PCL Visualizer
+│   └── main.cpp                       # 程序入口
+├── test/data/                         # 测试数据
+│   ├── bunny.pcd
+│   └── ism_test_cat.pcd
+└── build/
+    └── bin/rbf_implicit               # 可执行文件
 ```
 
-## 编译说明
+## 核心模块
 
-### 1. 创建构建目录并配置
+### DistanceFunction
 
-```bash
-cd /path/to/implict-boundary-rbf
-mkdir build
-cd build
-cmake ..
-```
+- 法向量估计（K 近邻）
+- 法向量方向一致化（全部朝外）
+- 离面点生成（沿法线投影）
 
-### 2. 编译
+### RBFInterpolator
 
-```bash
-make -j$(nproc)
-```
+- 多谐波 RBF：φ(r) = r 或 φ(r) = r³
+- 增广线性系统求解 [A P; P^T 0]
+- 多线程 LU 分解（Eigen）
+- 进度回调支持
 
-### 3. 运行
+### MarchingCubes
 
-```bash
-./bin/rbf_implicit
-```
+- 标准 Marching Cubes 算法
+- 可调节分辨率
+- 生成封闭三角网格
 
-## 算法原理
+## 已知问题
 
-### 1. 符号距离函数
+## 未来扩展
 
-对于每个点，计算其到最近的不同域样本的欧几里得距离：
+论文中提到但本基础版本未实现的优化：
 
-```
-DF(u_i) = {
-    -argmin(r)  if I(u_i) = 1 (内域)
-    +argmin(r)  if I(u_i) = 0 (外域)
-}
-
-r(u_i, u_j) = sqrt((x_i-x_j)² + (y_i-y_j)² + (z_i-z_j)²)
-```
-
-### 2. RBF 插值
-
-使用高斯径向基函数对距离函数进行插值：
-
-```
-s(u) = Σ w_i × φ(r(u, u_i))
-
-φ(r) = exp(-ε²r²)  (高斯 RBF)
-```
-
-权重通过求解线性方程组获得：
-
-```
-A × w = f
-
-其中 A_ij = φ(||u_i - u_j||)
-```
-
-### 3. Marching Cubes
-
-在体素网格上评估隐式函数，提取 s(u) = 0 的等值面作为边界。
-
-## 使用说明
-
-### 准备测试数据
-
-1. **点云文件** (PCD/PLY/XYZ 格式)
-   - 包含点的 3D 坐标
-   - 每行一个点
-
-2. **域标签文件** (TXT 格式)
-   - 每行一个标签 (0 或 1)
-   - 与点云中的点一一对应
-
-### 运行程序
-
-1. 点击 **"加载点云"** 按钮选择点云文件
-2. 点击 **"加载标签"** 按钮选择对应的域标签文件
-3. 点击 **"运行重建"** 执行 RBF 隐式边界重建
-4. 在独立的 PCL Visualizer 窗口中查看结果
-
-### 界面功能
-
-- **加载点云**: 支持 PCD、PLY、XYZ 格式
-- **加载标签**: 支持文本格式，每行一个 0 或 1
-- **运行重建**: 执行完整的 RBF 重建流程
-- **清除**: 重置所有数据
-
-### 可视化
-
-- 点云和重建的网格将在独立的 **PCL Visualizer** 窗口中显示
-- 使用鼠标交互：
-  - 左键拖动：旋转
-  - 中键拖动：平移
-  - 滚轮：缩放
-
-## 核心模块说明
-
-### DistanceFunction (符号距离函数)
-
-计算每个点到最近不同域样本的有符号距离，作为 RBF 插值的输入。
-
-### RBFInterpolator (RBF 插值器)
-
-- 构建高斯 RBF 矩阵
-- 使用 LAPACK 求解线性系统
-- 在任意位置评估插值函数
-
-**参数**:
-- `epsilon`: RBF 形状参数，控制影响半径 (默认: 0.1)
-
-### MarchingCubes (等值面提取)
-
-- 在体素网格上评估隐式函数
-- 使用标准 Marching Cubes 算法提取零等值面
-- 生成封闭、水密的三角网格
-
-**参数**:
-- `resolution`: 体素网格分辨率 (默认: 50)
-
-## 算法特点
-
-### 优势
-
-- **拓扑鲁棒性**: 生成封闭、水密的流形网格
-- **全局插值**: 对噪声和稀疏数据具有较强鲁棒性
-- **数学基础**: 基于严格的数学理论，可证明收敛性
-
-### 局限
-
-- **计算复杂度**: RBF 矩阵为稠密矩阵，大规模数据下计算开销大
-- **参数敏感**: epsilon 参数的选择影响结果
-- **内存占用**: N×N 矩阵需要 O(N²) 内存
-
-### 适用场景
-
-- 中小规模点云数据 (< 5000 点)
-- 需要拓扑保证的重建任务
-- 地质建模、医学图像处理等领域
-
-## 已知问题与注意事项
-
-### 可视化方式
-
-由于 VTK 9 中 `QVTKWidget` 已被弃用，本项目使用 **独立的 PCL Visualizer 窗口**显示结果，而不是嵌入到 Qt 窗口中。
-
-### 性能优化建议
-
-对于大规模点云数据：
-1. 使用更小的 `epsilon` 参数
-2. 降低 Marching Cubes 的分辨率
-3. 考虑实现 Partition of Unity 等加速方法
-
-## 文档
-
-- [需求文档](doc/requirement.md) - 项目需求和依赖说明
-- [论文翻译](doc/implict-boundary-with-rbf.md) - RBF 隐式边界建模论文
-- [研究报告](doc/research-report.md) - 算法对比分析
-- [实现计划](doc/implementation-plan.md) - 详细的实现步骤
-
-## 开发环境
-
-- **操作系统**: Linux Ubuntu 24.04 LTS
-- **编译器**: GCC 13.3.0
-- **CMake**: 3.16+
+1. **快速多极子方法（FMM）**：将评估复杂度降至 O(M + N log N)
+2. **贪婪中心缩减**：减少 80-90% 的中心点数量
+3. **紧凑支撑 RBF**：使矩阵变为稀疏矩阵
 
 ## 许可证
 
@@ -229,6 +190,8 @@ A × w = f
 
 ## 参考文献
 
-1. Sanchez, S., & Deutsch, C.V. (2022). Implicit Boundary Modeling with Radial Basis Functions. GeostatisticsLessons.com
-2. Cowan, J., et al. (2003). Practical Implicit Geological Modelling. 5th International Mining Geology Conference
-3. Carr, J.C., et al. (2001). Reconstruction and Representation of 3D Objects with Radial Basis Functions. SIGGRAPH 2001
+1. **Carr, J.C., et al. (2001)**. Reconstruction and Representation of 3D Objects with Radial Basis Functions. SIGGRAPH 2001.
+
+2. **Kazhdan, M., et al. (2006)**. Poisson Surface Reconstruction.
+
+3. **Lorensen, W.E., & Cline, H.E. (1987)**. Marching Cubes: A high resolution 3D surface construction algorithm.
