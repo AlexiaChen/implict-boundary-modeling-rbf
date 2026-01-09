@@ -269,7 +269,7 @@ void MainWindow::onRunRBFReconstruction() {
         progress.setLabelText("Extracting boundary mesh...");
         QApplication::processEvents();
 
-        MarchingCubes mc(interpolator, 30);
+        MarchingCubes mc(interpolator, 80);
         pcl::PolygonMesh mesh = mc.extract();
 
         // Step 4: Show results
@@ -341,12 +341,44 @@ void MainWindow::onRunPoissonReconstruction() {
         );
         normalEstimation.setSearchMethod(tree);
 
-        // Use 20 nearest neighbors for normal estimation
-        normalEstimation.setKSearch(20);
+        // 增加邻居数来改善法向量估计，特别对密度不均的区域
+        normalEstimation.setKSearch(50);  // 从 30 增加到 50
 
         // Estimate normals
         pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
         normalEstimation.compute(*normals);
+
+        // 计算点云中心
+        pcl::PointXYZ centroid(0, 0, 0);
+        for (const auto& point : cloud_->points) {
+            centroid.x += point.x;
+            centroid.y += point.y;
+            centroid.z += point.z;
+        }
+        centroid.x /= cloud_->size();
+        centroid.y /= cloud_->size();
+        centroid.z /= cloud_->size();
+
+        // 一致化法向量方向（所有法向量朝外）
+        for (size_t i = 0; i < normals->size(); ++i) {
+            Eigen::Vector3f normal(
+                normals->points[i].normal_x,
+                normals->points[i].normal_y,
+                normals->points[i].normal_z
+            );
+            Eigen::Vector3f centroidToPoint(
+                cloud_->points[i].x - centroid.x,
+                cloud_->points[i].y - centroid.y,
+                cloud_->points[i].z - centroid.z
+            );
+
+            // 如果法向量与"从中心指向点"方向相反，翻转法向量
+            if (normal.dot(centroidToPoint) < 0) {
+                normals->points[i].normal_x *= -1;
+                normals->points[i].normal_y *= -1;
+                normals->points[i].normal_z *= -1;
+            }
+        }
 
         // Concatenate XYZ and normals
         pcl::concatenateFields(*cloud_, *normals, *cloudWithNormals);
@@ -359,13 +391,14 @@ void MainWindow::onRunPoissonReconstruction() {
         pcl::Poisson<pcl::PointNormal> poisson;
         poisson.setInputCloud(cloudWithNormals);
 
-        // Set Poisson parameters
-        poisson.setDepth(9);  // Depth of the octree (higher = more detail, slower)
-        // poisson.setSolverDivide(8);
-        // poisson.setIsoDivide(8);
-        // poisson.setSamplesPerNode(1.0);
-        // poisson.setConfidence(false);
-        // poisson.setManifold(false);
+        // 调整 Poisson 参数来桥接间隙
+        poisson.setDepth(11);
+        poisson.setSolverDivide(8);
+        poisson.setIsoDivide(8);
+        poisson.setSamplesPerNode(1.2);  // 降低采样密度，让表面更平滑
+        poisson.setConfidence(false);    // 关闭置信度，让算法更激进地桥接间隙
+        poisson.setManifold(false);      // 关闭流形约束，允许非流形连接
+        poisson.setOutputPolygons(false); // 输出三角网格
 
         pcl::PolygonMesh mesh;
         poisson.reconstruct(mesh);
