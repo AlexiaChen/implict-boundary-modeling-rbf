@@ -1,6 +1,14 @@
 # RBF 3D 表面重建 (RBF 3D Surface Reconstruction)
 
-基于径向基函数（RBF）的 3D 点云表面重建算法实现
+基于径向基函数（RBF）的 3D 点云表面重建算法实现。
+
+## 前言
+
+为什么实现这个项目？是因为起因是有位国内自研BIM CAD软件的一位大佬，来我们院进行技术培训，它是做BIM软件地质算法相关的，培训讲解他们软件多牛逼时，顺带提了隐式建模的内容，给出一篇地质相关的隐式边界建模论文 [《Implicit Boundary Modeling with Radial Basis Functions》](https://geostatisticslessons.com/lessons/implicitrbf)（Sebastian Sanchez and Clayton V. Deutsch）, 并在他们的软件中实现了该算法，并且我跟他聊天的过程中，他说了RBF对比[Poisson重建](https://hhoppe.com/poissonrecon.pdf)的各种优点，， 我个人感觉他有点包装和炫耀个人技术嫌疑，并且他说的优点都是对比Poisson的缺点来说的，有点像学术界为了发篇论文而黑Poisson的感觉，Poisson也是著名大佬Hoppe的成果之一， 并且主流开源界都对Poisson算法进行了实现，并没有RBF的实现，我就觉得他的说法有点站不住脚，从工程上没说服我。或许RBF在地质建模上有优势吧，毕竟那片原始论文需要假定一个域标签，标记内域和外域，这样才可以重建表面，那篇论文本来就是地质相关的。
+
+所以我重新找了篇RBF的3D Object相关的论文来进行实现。
+
+对了，Poisson重建的原始论文是 [《Poisson Surface Reconstruction》](https://hhoppe.com/poissonrecon.pdf) (Michael Kazhdan1, Matthew Bolitho1 and Hugues Hoppe, 2006) 
 
 ## 项目概述
 
