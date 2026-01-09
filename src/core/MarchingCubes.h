@@ -7,6 +7,7 @@
 #include <pcl/PolygonMesh.h>
 #include <pcl/conversions.h>
 #include <memory>
+#include <unordered_map>
 
 namespace rbf {
 
@@ -65,7 +66,8 @@ private:
         int ix, int iy, int iz,
         const std::vector<double>& gridValues,
         pcl::PointCloud<pcl::PointXYZ>& cloud,
-        std::vector<pcl::Vertices>& triangles
+        std::vector<pcl::Vertices>& triangles,
+        std::unordered_map<uint64_t, int>& edgeVertexCache
     );
 
     /**
@@ -77,6 +79,22 @@ private:
         double v0,
         double v1
     ) const;
+
+    /**
+     * @brief 获取或创建边顶点（带缓存，确保水密性）
+     */
+    int getOrCreateEdgeVertex(
+        int ix, int iy, int iz,
+        int edge,
+        const std::vector<double>& gridValues,
+        pcl::PointCloud<pcl::PointXYZ>& cloud,
+        std::unordered_map<uint64_t, int>& edgeVertexCache
+    );
+
+    /**
+     * @brief 计算边的唯一键（基于两个网格顶点索引）
+     */
+    uint64_t getEdgeKey(int ix, int iy, int iz, int edge) const;
 
 private:
     std::shared_ptr<RBFInterpolator> interpolator_;

@@ -39,7 +39,6 @@ set(CORE_SOURCES
     src/core/DistanceFunction.cpp
     src/core/RBFInterpolator.cpp
     src/core/MarchingCubes.cpp
-    src/core/LabelInference.cpp
 )
 
 set(IO_SOURCES

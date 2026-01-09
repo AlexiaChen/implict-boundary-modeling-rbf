@@ -321,11 +321,15 @@ pcl::PolygonMesh MarchingCubes::extract() {
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     std::vector<pcl::Vertices> triangles;
 
+    // 顶点缓存：使用哈希表存储边键 -> 顶点索引的映射
+    // 边键由两个网格顶点索引组成，确保相邻体素共享相同的边顶点
+    std::unordered_map<uint64_t, int> edgeVertexCache;
+
     // 处理每个体素
     for (int iz = 0; iz < resolution_ - 1; ++iz) {
         for (int iy = 0; iy < resolution_ - 1; ++iy) {
             for (int ix = 0; ix < resolution_ - 1; ++ix) {
-                processCube(ix, iy, iz, gridValues, *cloud, triangles);
+                processCube(ix, iy, iz, gridValues, *cloud, triangles, edgeVertexCache);
             }
         }
     }
@@ -397,7 +401,8 @@ void MarchingCubes::processCube(
     int ix, int iy, int iz,
     const std::vector<double>& gridValues,
     pcl::PointCloud<pcl::PointXYZ>& cloud,
-    std::vector<pcl::Vertices>& triangles)
+    std::vector<pcl::Vertices>& triangles,
+    std::unordered_map<uint64_t, int>& edgeVertexCache)
 {
     // 获取立方体8个顶点的索引和值
     int vertexIndices[8];
@@ -418,9 +423,10 @@ void MarchingCubes::processCube(
     }
 
     // 计算立方体索引
+    // 符号定义：f > 0 表示物体内，f < 0 表示物体外
     int cubeIndex = 0;
     for (int i = 0; i < 8; ++i) {
-        if (vertexValues[i] < 0.0) {
+        if (vertexValues[i] > 0.0) {  // 翻转：用正值表示物体内
             cubeIndex |= (1 << i);
         }
     }
@@ -430,42 +436,27 @@ void MarchingCubes::processCube(
         return;
     }
 
-    // 计算边上的顶点
-    pcl::PointXYZ edgeVertices[12];
+    // 获取边上的顶点索引（使用缓存，确保相邻体素共享顶点）
+    int edgeVertexIndices[12];
     int edgeMask = edgeTable[cubeIndex];
 
     for (int e = 0; e < 12; ++e) {
         if (edgeMask & (1 << e)) {
-            // 获取这条边的两个顶点
-            static const int edgeEndpoints[12][2] = {
-                {0, 1}, {1, 2}, {2, 3}, {3, 0},
-                {4, 5}, {5, 6}, {6, 7}, {7, 4},
-                {0, 4}, {1, 5}, {2, 6}, {3, 7}
-            };
-
-            int v0 = edgeEndpoints[e][0];
-            int v1 = edgeEndpoints[e][1];
-
-            edgeVertices[e] = interpolateEdge(
-                vertexPositions[v0], vertexPositions[v1],
-                vertexValues[v0], vertexValues[v1]
+            edgeVertexIndices[e] = getOrCreateEdgeVertex(
+                ix, iy, iz, e, gridValues, cloud, edgeVertexCache
             );
+        } else {
+            edgeVertexIndices[e] = -1;
         }
     }
 
-    // 生成三角形
+    // 生成三角形（使用缓存的顶点索引）
     const int* tri = triTable[cubeIndex];
     for (int i = 0; tri[i] != -1; i += 3) {
         pcl::Vertices face;
-        face.vertices.push_back(static_cast<uint32_t>(cloud.size()));
-        cloud.push_back(edgeVertices[tri[i]]);
-
-        face.vertices.push_back(static_cast<uint32_t>(cloud.size()));
-        cloud.push_back(edgeVertices[tri[i + 1]]);
-
-        face.vertices.push_back(static_cast<uint32_t>(cloud.size()));
-        cloud.push_back(edgeVertices[tri[i + 2]]);
-
+        face.vertices.push_back(static_cast<uint32_t>(edgeVertexIndices[tri[i]]));
+        face.vertices.push_back(static_cast<uint32_t>(edgeVertexIndices[tri[i + 1]]));
+        face.vertices.push_back(static_cast<uint32_t>(edgeVertexIndices[tri[i + 2]]));
         triangles.push_back(face);
     }
 }
@@ -485,6 +476,108 @@ pcl::PointXYZ MarchingCubes::interpolateEdge(
     result.z = p0.z + t * (p1.z - p0.z);
 
     return result;
+}
+
+uint64_t MarchingCubes::getEdgeKey(int ix, int iy, int iz, int edge) const {
+    // 获取边的两个端点信息
+    static const int edgeEndpoints[12][2] = {
+        {0, 1}, {1, 2}, {2, 3}, {3, 0},
+        {4, 5}, {5, 6}, {6, 7}, {7, 4},
+        {0, 4}, {1, 5}, {2, 6}, {3, 7}
+    };
+
+    int v0 = edgeEndpoints[edge][0];
+    int v1 = edgeEndpoints[edge][1];
+
+    // 计算端点的网格坐标偏移
+    int dx0 = (v0 & 1) ? 1 : 0;
+    int dy0 = (v0 & 2) ? 1 : 0;
+    int dz0 = (v0 & 4) ? 1 : 0;
+
+    int dx1 = (v1 & 1) ? 1 : 0;
+    int dy1 = (v1 & 2) ? 1 : 0;
+    int dz1 = (v1 & 4) ? 1 : 0;
+
+    // 计算两个网格顶点的全局索引
+    int idx0 = (ix + dx0) + (iy + dy0) * resolution_ + (iz + dz0) * resolution_ * resolution_;
+    int idx1 = (ix + dx1) + (iy + dy1) * resolution_ + (iz + dz1) * resolution_ * resolution_;
+
+    // 确保小的索引在前（使边有唯一标识）
+    if (idx0 > idx1) {
+        std::swap(idx0, idx1);
+    }
+
+    // 使用配对的网格顶点索引作为边的唯一标识
+    // 将两个32位索引编码到一个64位整数中
+    return (static_cast<uint64_t>(idx0) << 32) | static_cast<uint64_t>(idx1);
+}
+
+int MarchingCubes::getOrCreateEdgeVertex(
+    int ix, int iy, int iz,
+    int edge,
+    const std::vector<double>& gridValues,
+    pcl::PointCloud<pcl::PointXYZ>& cloud,
+    std::unordered_map<uint64_t, int>& edgeVertexCache)
+{
+    // 计算边的唯一键
+    uint64_t edgeKey = getEdgeKey(ix, iy, iz, edge);
+
+    // 检查缓存
+    auto it = edgeVertexCache.find(edgeKey);
+    if (it != edgeVertexCache.end()) {
+        // 顶点已存在，返回缓存的索引
+        return it->second;
+    }
+
+    // 需要创建新顶点
+    // 获取这条边的两个端点信息
+    static const int edgeEndpoints[12][2] = {
+        {0, 1}, {1, 2}, {2, 3}, {3, 0},
+        {4, 5}, {5, 6}, {6, 7}, {7, 4},
+        {0, 4}, {1, 5}, {2, 6}, {3, 7}
+    };
+
+    int v0 = edgeEndpoints[edge][0];
+    int v1 = edgeEndpoints[edge][1];
+
+    // 计算端点的体素坐标偏移
+    int dx0 = (v0 & 1) ? 1 : 0;
+    int dy0 = (v0 & 2) ? 1 : 0;
+    int dz0 = (v0 & 4) ? 1 : 0;
+
+    int dx1 = (v1 & 1) ? 1 : 0;
+    int dy1 = (v1 & 2) ? 1 : 0;
+    int dz1 = (v1 & 4) ? 1 : 0;
+
+    // 获取端点位置和值
+    pcl::PointXYZ p0, p1;
+    double v0_val, v1_val;
+
+    p0.x = minBound_[0] + (ix + dx0) * voxelSize_[0];
+    p0.y = minBound_[1] + (iy + dy0) * voxelSize_[1];
+    p0.z = minBound_[2] + (iz + dz0) * voxelSize_[2];
+
+    p1.x = minBound_[0] + (ix + dx1) * voxelSize_[0];
+    p1.y = minBound_[1] + (iy + dy1) * voxelSize_[1];
+    p1.z = minBound_[2] + (iz + dz1) * voxelSize_[2];
+
+    int idx0 = (ix + dx0) + (iy + dy0) * resolution_ + (iz + dz0) * resolution_ * resolution_;
+    int idx1 = (ix + dx1) + (iy + dy1) * resolution_ + (iz + dz1) * resolution_ * resolution_;
+
+    v0_val = gridValues[idx0];
+    v1_val = gridValues[idx1];
+
+    // 插值计算边顶点位置
+    pcl::PointXYZ vertex = interpolateEdge(p0, p1, v0_val, v1_val);
+
+    // 添加到点云
+    int vertexIndex = static_cast<int>(cloud.size());
+    cloud.push_back(vertex);
+
+    // 缓存顶点索引
+    edgeVertexCache[edgeKey] = vertexIndex;
+
+    return vertexIndex;
 }
 
 } // namespace rbf

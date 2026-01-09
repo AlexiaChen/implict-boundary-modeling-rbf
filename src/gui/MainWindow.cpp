@@ -262,7 +262,7 @@ void MainWindow::onRunRBFReconstruction() {
 
         qDebug() << "[RBF] Step 4/" << TOTAL_STEPS << ": Running Marching Cubes";
 
-        MarchingCubes mc(interpolator, 80);
+        MarchingCubes mc(interpolator, 100);
         pcl::PolygonMesh mesh = mc.extract();
 
         progress.setValue(95000);  // 95.000%
