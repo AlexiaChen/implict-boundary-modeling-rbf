@@ -55,9 +55,7 @@ set(MAIN_SOURCES
     src/main.cpp
 )
 
-set(TOOL_SOURCES
-    tools/generate_test_data.cpp
-)
+
 
 # Qt MOC/UI 处理
 set(CMAKE_AUTOMOC ON)
@@ -70,11 +68,6 @@ add_executable(rbf_implicit
     ${IO_SOURCES}
     ${GUI_SOURCES}
     ${MAIN_SOURCES}
-)
-
-# 测试数据生成工具
-add_executable(generate_test_data
-    ${TOOL_SOURCES}
 )
 
 # 链接库
