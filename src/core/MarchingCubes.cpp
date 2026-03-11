@@ -4,6 +4,22 @@
 
 namespace rbf {
 
+namespace {
+
+// 标准 Marching Cubes 角点编号，必须与 edgeTable/triTable 完全一致。
+constexpr int kCornerOffsets[8][3] = {
+    {0, 0, 0},
+    {1, 0, 0},
+    {1, 1, 0},
+    {0, 1, 0},
+    {0, 0, 1},
+    {1, 0, 1},
+    {1, 1, 1},
+    {0, 1, 1}
+};
+
+} // namespace
+
 // Marching Cubes 边表和三角表 (标准实现)
 static const int edgeTable[256] = {
     0x0, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
@@ -410,9 +426,9 @@ void MarchingCubes::processCube(
     pcl::PointXYZ vertexPositions[8];
 
     for (int i = 0; i < 8; ++i) {
-        int dx = (i & 1) ? 1 : 0;
-        int dy = (i & 2) ? 1 : 0;
-        int dz = (i & 4) ? 1 : 0;
+        int dx = kCornerOffsets[i][0];
+        int dy = kCornerOffsets[i][1];
+        int dz = kCornerOffsets[i][2];
 
         vertexIndices[i] = (ix + dx) + (iy + dy) * resolution_ + (iz + dz) * resolution_ * resolution_;
         vertexValues[i] = gridValues[vertexIndices[i]];
@@ -490,13 +506,13 @@ uint64_t MarchingCubes::getEdgeKey(int ix, int iy, int iz, int edge) const {
     int v1 = edgeEndpoints[edge][1];
 
     // 计算端点的网格坐标偏移
-    int dx0 = (v0 & 1) ? 1 : 0;
-    int dy0 = (v0 & 2) ? 1 : 0;
-    int dz0 = (v0 & 4) ? 1 : 0;
+    int dx0 = kCornerOffsets[v0][0];
+    int dy0 = kCornerOffsets[v0][1];
+    int dz0 = kCornerOffsets[v0][2];
 
-    int dx1 = (v1 & 1) ? 1 : 0;
-    int dy1 = (v1 & 2) ? 1 : 0;
-    int dz1 = (v1 & 4) ? 1 : 0;
+    int dx1 = kCornerOffsets[v1][0];
+    int dy1 = kCornerOffsets[v1][1];
+    int dz1 = kCornerOffsets[v1][2];
 
     // 计算两个网格顶点的全局索引
     int idx0 = (ix + dx0) + (iy + dy0) * resolution_ + (iz + dz0) * resolution_ * resolution_;
@@ -541,13 +557,13 @@ int MarchingCubes::getOrCreateEdgeVertex(
     int v1 = edgeEndpoints[edge][1];
 
     // 计算端点的体素坐标偏移
-    int dx0 = (v0 & 1) ? 1 : 0;
-    int dy0 = (v0 & 2) ? 1 : 0;
-    int dz0 = (v0 & 4) ? 1 : 0;
+    int dx0 = kCornerOffsets[v0][0];
+    int dy0 = kCornerOffsets[v0][1];
+    int dz0 = kCornerOffsets[v0][2];
 
-    int dx1 = (v1 & 1) ? 1 : 0;
-    int dy1 = (v1 & 2) ? 1 : 0;
-    int dz1 = (v1 & 4) ? 1 : 0;
+    int dx1 = kCornerOffsets[v1][0];
+    int dy1 = kCornerOffsets[v1][1];
+    int dz1 = kCornerOffsets[v1][2];
 
     // 获取端点位置和值
     pcl::PointXYZ p0, p1;
