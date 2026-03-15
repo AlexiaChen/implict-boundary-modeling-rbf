@@ -7,6 +7,7 @@
 #include <QString>
 #include <limits>
 #include <algorithm>
+#include <numeric>
 
 namespace rbf {
 
@@ -206,11 +207,17 @@ bool RBFInterpolator::solveWithFastMultipole() {
         radius = estimateNeighborRadiusFromBBox();
     }
     double support = solverOptions_.supportRadius;
-    if (solverOptions_.useCompactSupport && support <= 0.0) {
-        support = cachedSupportRadius_ > 0.0 ? cachedSupportRadius_ : estimateSupportRadiusFromBBox();
-    }
-    if (solverOptions_.useCompactSupport && support > 0.0) {
-        radius = std::min(radius, support);
+    if (solverOptions_.useCompactSupport) {
+        if (support <= 0.0) {
+            support = cachedSupportRadius_ > 0.0 ? cachedSupportRadius_ : estimateSupportRadiusFromBBox();
+        }
+        // 调整支撑半径以确保足够邻居
+        double calibrated = calibrateSupportRadius(8);
+        support = std::max(support, calibrated);
+        cachedSupportRadius_ = support;
+        if (support > 0.0) {
+            radius = std::min(radius, support);
+        }
     }
 
     std::vector<Eigen::Triplet<double>> triplets;
@@ -372,6 +379,46 @@ double RBFInterpolator::estimateSupportRadiusFromBBox() const {
 
     // 缺省使用 5% 的对角线作为支撑半径
     return 0.05 * diag;
+}
+
+double RBFInterpolator::calibrateSupportRadius(int kth) const {
+    if (centers_->empty()) {
+        return 0.0;
+    }
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud(centers_);
+
+    std::vector<float> samples;
+    samples.reserve(std::min<size_t>(centers_->size(), 512));
+
+    std::vector<int> idx;
+    std::vector<float> dist2;
+
+    size_t step = std::max<size_t>(1, centers_->size() / 512);
+    for (size_t i = 0; i < centers_->size(); i += step) {
+        idx.clear();
+        dist2.clear();
+        int found = kdtree.nearestKSearch(centers_->points[i], std::max(2, kth + 1), idx, dist2);
+        if (found > kth) {
+            samples.push_back(dist2[kth]);
+        }
+    }
+
+    if (samples.empty()) {
+        return estimateSupportRadiusFromBBox();
+    }
+
+    std::nth_element(samples.begin(), samples.begin() + samples.size() / 2, samples.end());
+    double medianDist2 = samples[samples.size() / 2];
+    double medianDist = std::sqrt(static_cast<double>(medianDist2));
+
+    // 放大系数确保有足够邻居
+    double scaled = 1.5 * medianDist;
+
+    // 上限保护
+    double bboxBased = estimateSupportRadiusFromBBox(); // 5% diag
+    double upper = 0.2 * (bboxBased / 0.05); // 20% diag
+    return std::min(scaled, upper);
 }
 
 double RBFInterpolator::evaluate(const pcl::PointXYZ& point) const {

@@ -205,6 +205,7 @@ private:
     bool solveWithFastMultipole();
     double estimateNeighborRadiusFromBBox() const;
     double estimateSupportRadiusFromBBox() const;
+    double calibrateSupportRadius(int kth) const;
 
 private:
     pcl::PointCloud<pcl::PointXYZ>::Ptr centers_;     // RBF 中心点
