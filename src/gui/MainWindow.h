@@ -7,6 +7,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QCheckBox>
+#include <QSpinBox>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QGroupBox>
@@ -55,6 +56,9 @@ private:
     QPushButton* btnClear_;
     QLabel* labelStatus_;
     QCheckBox* chkFastMode_;
+    QCheckBox* chkGreedyCenters_;
+    QCheckBox* chkCompactSupport_;
+    QSpinBox* spinMaxCenters_;
     PointCloudViewer* viewer_;
 
     // Data

@@ -4,11 +4,66 @@
 #include <QDebug>
 #include <chrono>
 #include <algorithm>
+#include <limits>
+#include <cmath>
 #include <pcl/surface/poisson.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/surface/vtk_smoothing/vtk_utils.h>
 
 namespace rbf {
+
+namespace {
+std::vector<OffSurfacePoint> greedyCenterReduce(
+    const std::vector<OffSurfacePoint>& points,
+    size_t maxCenters)
+{
+    if (points.size() <= maxCenters || maxCenters == 0) {
+        return points;
+    }
+
+    std::vector<OffSurfacePoint> selected;
+    selected.reserve(maxCenters);
+
+    const size_t n = points.size();
+    std::vector<double> minDist2(n, std::numeric_limits<double>::max());
+
+    // 选第一个点
+    selected.push_back(points[0]);
+    size_t lastIdx = 0;
+
+    auto squaredDist = [](const OffSurfacePoint& a, const OffSurfacePoint& b) {
+        double dx = a.position.x - b.position.x;
+        double dy = a.position.y - b.position.y;
+        double dz = a.position.z - b.position.z;
+        return dx * dx + dy * dy + dz * dz;
+    };
+
+    while (selected.size() < maxCenters) {
+        // 更新最小距离
+        for (size_t i = 0; i < n; ++i) {
+            double d2 = squaredDist(points[i], points[lastIdx]);
+            if (d2 < minDist2[i]) {
+                minDist2[i] = d2;
+            }
+        }
+
+        // 选择当前最远的点
+        size_t farthestIdx = 0;
+        double farthestDist = -1.0;
+        for (size_t i = 0; i < n; ++i) {
+            if (minDist2[i] > farthestDist) {
+                farthestDist = minDist2[i];
+                farthestIdx = i;
+            }
+        }
+
+        selected.push_back(points[farthestIdx]);
+        lastIdx = farthestIdx;
+    }
+
+    return selected;
+}
+} // namespace
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -47,6 +102,14 @@ void MainWindow::setupUI() {
     btnClear_ = new QPushButton("Clear");
     chkFastMode_ = new QCheckBox("Fast (FMM-style sparse solver)");
     chkFastMode_->setChecked(true);
+    chkGreedyCenters_ = new QCheckBox("Greedy center reduction");
+    chkGreedyCenters_->setChecked(true);
+    chkCompactSupport_ = new QCheckBox("Compactly supported RBF");
+    chkCompactSupport_->setChecked(false);
+    spinMaxCenters_ = new QSpinBox();
+    spinMaxCenters_->setRange(100, 200000);
+    spinMaxCenters_->setValue(8000);
+    spinMaxCenters_->setSuffix(" centers max");
 
     btnLoadCloud_->setEnabled(true);
     btnRunRBF_->setEnabled(false);
@@ -61,6 +124,10 @@ void MainWindow::setupUI() {
 
     controlLayout->addSpacing(20);
     controlLayout->addWidget(chkFastMode_);
+    controlLayout->addSpacing(10);
+    controlLayout->addWidget(chkGreedyCenters_);
+    controlLayout->addWidget(spinMaxCenters_);
+    controlLayout->addWidget(chkCompactSupport_);
     controlLayout->addSpacing(10);
 
     // Status label
@@ -185,6 +252,16 @@ void MainWindow::onRunRBFReconstruction() {
         );
         qDebug() << "[RBF] Step 2 complete: Generated" << offSurfacePoints.size() << "off-surface points";
 
+        if (chkGreedyCenters_->isChecked()) {
+            size_t maxCenters = static_cast<size_t>(spinMaxCenters_->value());
+            auto reduced = greedyCenterReduce(offSurfacePoints, maxCenters);
+            qDebug() << "[RBF] Greedy center reduction from" << offSurfacePoints.size() << "to" << reduced.size();
+            offSurfacePoints.swap(reduced);
+            labelStatus_->setText(
+                QString("Status: [2/%1] Greedy reduced to %2 centers").arg(TOTAL_STEPS).arg(offSurfacePoints.size())
+            );
+        }
+
         // Step 3: Build RBF interpolator (40% - 60%)
         currentStep = 3;
         progress.setValue(40000);  // 40.000%
@@ -219,8 +296,13 @@ void MainWindow::onRunRBFReconstruction() {
 
         RBFInterpolator::SolverOptions solverOptions;
         solverOptions.useFastMultipole = chkFastMode_->isChecked();
+        solverOptions.useCompactSupport = chkCompactSupport_->isChecked();
+        solverOptions.supportRadius = 0.05 * bboxDiagonal;   // 5% 包围盒对角线
         solverOptions.neighborRadius = 0.03 * bboxDiagonal;  // 3% 包围盒对角线
         solverOptions.maxNeighbors = 96;
+        if (solverOptions.useCompactSupport && solverOptions.supportRadius > 0.0) {
+            solverOptions.neighborRadius = std::min(solverOptions.neighborRadius, solverOptions.supportRadius);
+        }
         interpolator->setSolverOptions(solverOptions);
 
         progress.setValue(50000);  // 50.000%
@@ -240,9 +322,15 @@ void MainWindow::onRunRBFReconstruction() {
         if (solverOptions.useFastMultipole) {
             qDebug() << "[RBF] Using fast multipole-style sparse solve, radius:"
                      << solverOptions.neighborRadius << "maxNeighbors:" << solverOptions.maxNeighbors;
+            if (solverOptions.useCompactSupport) {
+                qDebug() << "[RBF] Compact support radius:" << solverOptions.supportRadius;
+            }
             labelStatus_->setText(QString("Status: [3/%1] Sparse/FMM mode enabled").arg(TOTAL_STEPS));
         } else {
             qDebug() << "[RBF] Using Eigen multi-threaded LU decomposition...";
+            if (solverOptions.useCompactSupport) {
+                qDebug() << "[RBF] Compact support radius:" << solverOptions.supportRadius;
+            }
         }
 
         // 设置进度回调：将 solve() 内部的 0-100 进度映射到进度条的 50000-90000 范围

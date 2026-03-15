@@ -47,6 +47,11 @@ public:
         Cubic    // φ(r) = r³ (三谐波，更光滑)
     };
 
+    enum class KernelSupport {
+        Global,
+        Compact
+    };
+
     /**
      * @brief 构造函数
      *
@@ -68,11 +73,15 @@ public:
      * useFastMultipole: 使用近似多极加速（稀疏/迭代）
      * neighborRadius: 稀疏半径（<=0 自动按包围盒对角线百分比计算）
      * maxNeighbors: 邻域上限（0 表示仅按半径搜索）
+     * useCompactSupport: 使用紧凑支撑核（Wendland C2），核函数在 supportRadius 外为 0
+     * supportRadius: 紧凑支撑半径（<=0 自动按包围盒对角线百分比计算）
      */
     struct SolverOptions {
         bool useFastMultipole = false;
         double neighborRadius = -1.0;
         int maxNeighbors = 64;
+        bool useCompactSupport = false;
+        double supportRadius = -1.0;
     };
 
     /**
@@ -153,6 +162,11 @@ public:
 
 private:
     /**
+     * @brief 统一的核函数入口，自动考虑紧凑支撑
+     */
+    double radialBasis(double r) const;
+
+    /**
      * @brief 计算多谐波 RBF 值
      *
      * Linear (双谐波): φ(r) = r
@@ -190,6 +204,7 @@ private:
     bool solveDense();
     bool solveWithFastMultipole();
     double estimateNeighborRadiusFromBBox() const;
+    double estimateSupportRadiusFromBBox() const;
 
 private:
     pcl::PointCloud<pcl::PointXYZ>::Ptr centers_;     // RBF 中心点
@@ -199,6 +214,7 @@ private:
     RBFFunction rbfType_;                             // RBF 类型
     SolverOptions solverOptions_;                     // 求解配置
     bool solved_;                                     // 是否已求解
+    double cachedSupportRadius_;                      // 缓存的支撑半径
     ProgressCallback progressCallback_;                // 进度回调函数
 };
 

@@ -21,6 +21,7 @@ RBFInterpolator::RBFInterpolator(
     , rbfType_(rbfType)
     , solverOptions_()
     , solved_(false)
+    , cachedSupportRadius_(-1.0)
     , progressCallback_(nullptr)
 {
     if (!centers || centers->empty()) {
@@ -58,6 +59,14 @@ bool RBFInterpolator::solveDense() {
     int n = static_cast<int>(centers_->size());
     int augN = n + 4;  // 增广系统大小 (N+4) × (N+4)
 
+    if (solverOptions_.useCompactSupport) {
+        cachedSupportRadius_ = (solverOptions_.supportRadius > 0.0)
+            ? solverOptions_.supportRadius
+            : estimateSupportRadiusFromBBox();
+    } else {
+        cachedSupportRadius_ = -1.0;
+    }
+
     // 使用 Eigen 构建并求解增广线性系统
     // ┌   A    P ┐ ┌ λ ┐   ┌ f ┐
     // │          │ │   │ = │   │
@@ -82,7 +91,7 @@ bool RBFInterpolator::solveDense() {
             double dz = pi.z - pj.z;
             double r = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-            A_aug(i, j) = polyharmonicRBF(r);
+            A_aug(i, j) = radialBasis(r);
         }
 
         // 每10%报告一次进度
@@ -181,12 +190,27 @@ bool RBFInterpolator::solveWithFastMultipole() {
         return false;
     }
 
+    if (solverOptions_.useCompactSupport) {
+        cachedSupportRadius_ = (solverOptions_.supportRadius > 0.0)
+            ? solverOptions_.supportRadius
+            : estimateSupportRadiusFromBBox();
+    } else {
+        cachedSupportRadius_ = -1.0;
+    }
+
     pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
     kdtree.setInputCloud(centers_);
 
     double radius = solverOptions_.neighborRadius;
     if (radius <= 0.0) {
         radius = estimateNeighborRadiusFromBBox();
+    }
+    double support = solverOptions_.supportRadius;
+    if (solverOptions_.useCompactSupport && support <= 0.0) {
+        support = cachedSupportRadius_ > 0.0 ? cachedSupportRadius_ : estimateSupportRadiusFromBBox();
+    }
+    if (solverOptions_.useCompactSupport && support > 0.0) {
+        radius = std::min(radius, support);
     }
 
     std::vector<Eigen::Triplet<double>> triplets;
@@ -218,7 +242,10 @@ bool RBFInterpolator::solveWithFastMultipole() {
             }
 
             double r = std::sqrt(static_cast<double>(dist2[k]));
-            double value = polyharmonicRBF(r);
+            double value = radialBasis(r);
+            if (value == 0.0) {
+                continue;
+            }
 
             // 对称填充，避免重复的自环
             if (i == j) {
@@ -321,6 +348,32 @@ double RBFInterpolator::estimateNeighborRadiusFromBBox() const {
     return 0.03 * diag;
 }
 
+double RBFInterpolator::estimateSupportRadiusFromBBox() const {
+    double minX = std::numeric_limits<double>::max();
+    double minY = minX;
+    double minZ = minX;
+    double maxX = std::numeric_limits<double>::lowest();
+    double maxY = maxX;
+    double maxZ = maxX;
+
+    for (const auto& p : centers_->points) {
+        minX = std::min(minX, static_cast<double>(p.x));
+        minY = std::min(minY, static_cast<double>(p.y));
+        minZ = std::min(minZ, static_cast<double>(p.z));
+        maxX = std::max(maxX, static_cast<double>(p.x));
+        maxY = std::max(maxY, static_cast<double>(p.y));
+        maxZ = std::max(maxZ, static_cast<double>(p.z));
+    }
+
+    double dx = maxX - minX;
+    double dy = maxY - minY;
+    double dz = maxZ - minZ;
+    double diag = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+    // 缺省使用 5% 的对角线作为支撑半径
+    return 0.05 * diag;
+}
+
 double RBFInterpolator::evaluate(const pcl::PointXYZ& point) const {
     if (!solved_) {
         throw std::runtime_error(
@@ -341,8 +394,7 @@ double RBFInterpolator::evaluate(const pcl::PointXYZ& point) const {
         double dz = point.z - center.z;
         double r = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-        // 多谐波 RBF
-        sum += lambda_[i] * polyharmonicRBF(r);
+        sum += lambda_[i] * radialBasis(r);
     }
 
     // 多项式部分: p(x) = c_0 + c_1*x + c_2*y + c_3*z
@@ -363,6 +415,30 @@ double RBFInterpolator::polyharmonicRBF(double r) const {
         default:
             return r;
     }
+}
+
+double RBFInterpolator::radialBasis(double r) const {
+    if (solverOptions_.useCompactSupport) {
+        double support = cachedSupportRadius_;
+        if (support <= 0.0) {
+            support = solverOptions_.supportRadius > 0.0
+                ? solverOptions_.supportRadius
+                : estimateSupportRadiusFromBBox();
+        }
+        if (support <= 0.0) {
+            return 0.0;
+        }
+        if (r >= support) {
+            return 0.0;
+        }
+        // Wendland C2: (1 - q)^4 * (4q + 1), q = r / support
+        double q = r / support;
+        double oneMinusQ = 1.0 - q;
+        double oneMinusQ2 = oneMinusQ * oneMinusQ;
+        double oneMinusQ4 = oneMinusQ2 * oneMinusQ2;
+        return oneMinusQ4 * (4.0 * q + 1.0);
+    }
+    return polyharmonicRBF(r);
 }
 
 void RBFInterpolator::buildAugmentedMatrix(std::vector<double>& A, int n) const {
