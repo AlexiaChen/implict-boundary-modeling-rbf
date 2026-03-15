@@ -3,6 +3,7 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <Eigen/Sparse>
 #include <vector>
 #include <memory>
 #include <functional>
@@ -62,6 +63,19 @@ public:
     ~RBFInterpolator();
 
     /**
+     * @brief 求解器配置
+     *
+     * useFastMultipole: 使用近似多极加速（稀疏/迭代）
+     * neighborRadius: 稀疏半径（<=0 自动按包围盒对角线百分比计算）
+     * maxNeighbors: 邻域上限（0 表示仅按半径搜索）
+     */
+    struct SolverOptions {
+        bool useFastMultipole = false;
+        double neighborRadius = -1.0;
+        int maxNeighbors = 64;
+    };
+
+    /**
      * @brief 设置进度回调函数
      *
      * @param callback 进度回调函数
@@ -111,6 +125,16 @@ public:
      * @brief 设置 RBF 函数类型
      */
     void setRBFFunction(RBFFunction type) { rbfType_ = type; }
+
+    /**
+     * @brief 设置求解选项
+     */
+    void setSolverOptions(const SolverOptions& options) { solverOptions_ = options; }
+
+    /**
+     * @brief 获取求解选项
+     */
+    SolverOptions getSolverOptions() const { return solverOptions_; }
 
     /**
      * @brief 获取 RBF 函数类型
@@ -163,12 +187,17 @@ private:
         int n
     ) const;
 
+    bool solveDense();
+    bool solveWithFastMultipole();
+    double estimateNeighborRadiusFromBBox() const;
+
 private:
     pcl::PointCloud<pcl::PointXYZ>::Ptr centers_;     // RBF 中心点
     std::vector<double> distanceValues_;              // 符号距离函数值
     std::vector<double> lambda_;                      // RBF 权重 (N个)
     std::vector<double> polyCoeffs_;                  // 多项式系数 (4个)
     RBFFunction rbfType_;                             // RBF 类型
+    SolverOptions solverOptions_;                     // 求解配置
     bool solved_;                                     // 是否已求解
     ProgressCallback progressCallback_;                // 进度回调函数
 };

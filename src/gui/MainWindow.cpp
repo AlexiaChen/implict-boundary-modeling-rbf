@@ -45,6 +45,8 @@ void MainWindow::setupUI() {
     btnRunRBF_ = new QPushButton("Reconstruct with RBF");
     btnRunPoisson_ = new QPushButton("Reconstruct with Poisson");
     btnClear_ = new QPushButton("Clear");
+    chkFastMode_ = new QCheckBox("Fast (FMM-style sparse solver)");
+    chkFastMode_->setChecked(true);
 
     btnLoadCloud_->setEnabled(true);
     btnRunRBF_->setEnabled(false);
@@ -58,6 +60,8 @@ void MainWindow::setupUI() {
     controlLayout->addWidget(btnClear_);
 
     controlLayout->addSpacing(20);
+    controlLayout->addWidget(chkFastMode_);
+    controlLayout->addSpacing(10);
 
     // Status label
     labelStatus_ = new QLabel("Status: Please load point cloud data");
@@ -213,6 +217,12 @@ void MainWindow::onRunRBFReconstruction() {
             RBFInterpolator::RBFFunction::Linear  // φ(r) = r
         );
 
+        RBFInterpolator::SolverOptions solverOptions;
+        solverOptions.useFastMultipole = chkFastMode_->isChecked();
+        solverOptions.neighborRadius = 0.03 * bboxDiagonal;  // 3% 包围盒对角线
+        solverOptions.maxNeighbors = 96;
+        interpolator->setSolverOptions(solverOptions);
+
         progress.setValue(50000);  // 50.000%
         QApplication::processEvents();
 
@@ -227,7 +237,13 @@ void MainWindow::onRunRBFReconstruction() {
 
         qDebug() << "[RBF] Building" << matrixSize << "x" << matrixSize << "augmented matrix...";
         qDebug() << "[RBF] This may take a while for large matrices (O(n³) complexity)";
-        qDebug() << "[RBF] Using Eigen multi-threaded LU decomposition...";
+        if (solverOptions.useFastMultipole) {
+            qDebug() << "[RBF] Using fast multipole-style sparse solve, radius:"
+                     << solverOptions.neighborRadius << "maxNeighbors:" << solverOptions.maxNeighbors;
+            labelStatus_->setText(QString("Status: [3/%1] Sparse/FMM mode enabled").arg(TOTAL_STEPS));
+        } else {
+            qDebug() << "[RBF] Using Eigen multi-threaded LU decomposition...";
+        }
 
         // 设置进度回调：将 solve() 内部的 0-100 进度映射到进度条的 50000-90000 范围
         interpolator->setProgressCallback([&](int current, int total, const std::string& message) {

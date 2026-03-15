@@ -2,7 +2,11 @@
 #include <cmath>
 #include <stdexcept>
 #include <Eigen/Dense>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <Eigen/SparseLU>
 #include <QString>
+#include <limits>
+#include <algorithm>
 
 namespace rbf {
 
@@ -15,6 +19,7 @@ RBFInterpolator::RBFInterpolator(
     , lambda_()
     , polyCoeffs_(4, 0.0)
     , rbfType_(rbfType)
+    , solverOptions_()
     , solved_(false)
     , progressCallback_(nullptr)
 {
@@ -34,6 +39,22 @@ RBFInterpolator::RBFInterpolator(
 RBFInterpolator::~RBFInterpolator() = default;
 
 bool RBFInterpolator::solve() {
+    if (solverOptions_.useFastMultipole) {
+        if (progressCallback_) {
+            progressCallback_(0, 100, "Using fast multipole-style sparse solver...");
+        }
+        bool ok = solveWithFastMultipole();
+        if (ok) {
+            return true;
+        }
+        if (progressCallback_) {
+            progressCallback_(0, 100, "Fallback to dense solver after sparse attempt failed...");
+        }
+    }
+    return solveDense();
+}
+
+bool RBFInterpolator::solveDense() {
     int n = static_cast<int>(centers_->size());
     int augN = n + 4;  // 增广系统大小 (N+4) × (N+4)
 
@@ -150,6 +171,154 @@ bool RBFInterpolator::solve() {
 
     solved_ = true;
     return true;
+}
+
+bool RBFInterpolator::solveWithFastMultipole() {
+    int n = static_cast<int>(centers_->size());
+    int augN = n + 4;
+
+    if (n == 0) {
+        return false;
+    }
+
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud(centers_);
+
+    double radius = solverOptions_.neighborRadius;
+    if (radius <= 0.0) {
+        radius = estimateNeighborRadiusFromBBox();
+    }
+
+    std::vector<Eigen::Triplet<double>> triplets;
+    triplets.reserve(static_cast<size_t>(n) * std::max(16, solverOptions_.maxNeighbors + 4));
+
+    if (progressCallback_) {
+        progressCallback_(5, 100, QString("Building sparse RBF matrix (r=%.4f)...").arg(radius).toStdString());
+    }
+
+    std::vector<int> idx;
+    std::vector<float> dist2;
+    idx.reserve(static_cast<size_t>(std::max(8, solverOptions_.maxNeighbors)));
+    dist2.reserve(idx.size());
+
+    for (int i = 0; i < n; ++i) {
+        const auto& pi = centers_->points[i];
+
+        int found = 0;
+        if (solverOptions_.maxNeighbors > 0) {
+            found = kdtree.nearestKSearch(pi, solverOptions_.maxNeighbors, idx, dist2);
+        } else {
+            found = kdtree.radiusSearch(pi, radius, idx, dist2);
+        }
+
+        for (int k = 0; k < found; ++k) {
+            int j = idx[k];
+            if (j >= augN) {
+                continue;
+            }
+
+            double r = std::sqrt(static_cast<double>(dist2[k]));
+            double value = polyharmonicRBF(r);
+
+            // 对称填充，避免重复的自环
+            if (i == j) {
+                triplets.emplace_back(i, j, value);
+            } else {
+                triplets.emplace_back(i, j, value);
+                triplets.emplace_back(j, i, value);
+            }
+        }
+
+        // P / P^T
+        triplets.emplace_back(i, n + 0, 1.0);
+        triplets.emplace_back(i, n + 1, pi.x);
+        triplets.emplace_back(i, n + 2, pi.y);
+        triplets.emplace_back(i, n + 3, pi.z);
+
+        triplets.emplace_back(n + 0, i, 1.0);
+        triplets.emplace_back(n + 1, i, pi.x);
+        triplets.emplace_back(n + 2, i, pi.y);
+        triplets.emplace_back(n + 3, i, pi.z);
+
+        if (progressCallback_ && (i % std::max(1, n / 10)) == 0) {
+            int progress = 5 + static_cast<int>(25.0 * i / n);
+            progressCallback_(
+                progress,
+                100,
+                QString("Sparse assembly %1/%2").arg(i).arg(n).toStdString()
+            );
+        }
+    }
+
+    Eigen::SparseMatrix<double> A_aug(augN, augN);
+    A_aug.setFromTriplets(triplets.begin(), triplets.end());
+    A_aug.makeCompressed();
+
+    Eigen::VectorXd b_aug(augN);
+    for (int i = 0; i < n; ++i) {
+        b_aug(i) = distanceValues_[i];
+    }
+    b_aug.tail(4).setZero();
+
+    if (progressCallback_) {
+        progressCallback_(35, 100, "Running SparseLU factorization...");
+    }
+
+    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+    solver.analyzePattern(A_aug);
+    solver.factorize(A_aug);
+
+    if (solver.info() != Eigen::Success) {
+        return false;
+    }
+
+    Eigen::VectorXd x_aug = solver.solve(b_aug);
+    if (solver.info() != Eigen::Success) {
+        return false;
+    }
+
+    if (progressCallback_) {
+        progressCallback_(90, 100, "Sparse solve complete, extracting weights...");
+    }
+
+    for (int i = 0; i < n; ++i) {
+        lambda_[i] = x_aug(i);
+    }
+    for (int i = 0; i < 4; ++i) {
+        polyCoeffs_[i] = x_aug(n + i);
+    }
+
+    solved_ = true;
+    if (progressCallback_) {
+        progressCallback_(100, 100, "Fast multipole-style solve finished");
+    }
+    return true;
+}
+
+double RBFInterpolator::estimateNeighborRadiusFromBBox() const {
+    double minX = std::numeric_limits<double>::max();
+    double minY = minX;
+    double minZ = minX;
+    double maxX = std::numeric_limits<double>::lowest();
+    double maxY = maxX;
+    double maxZ = maxX;
+
+    for (const auto& p : centers_->points) {
+        minX = std::min(minX, static_cast<double>(p.x));
+        minY = std::min(minY, static_cast<double>(p.y));
+        minZ = std::min(minZ, static_cast<double>(p.z));
+        maxX = std::max(maxX, static_cast<double>(p.x));
+        maxY = std::max(maxY, static_cast<double>(p.y));
+        maxZ = std::max(maxZ, static_cast<double>(p.z));
+    }
+
+    double dx = maxX - minX;
+    double dy = maxY - minY;
+    double dz = maxZ - minZ;
+    double diag = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+    // 缺省使用 3% 的对角线作为邻域半径
+    return 0.03 * diag;
 }
 
 double RBFInterpolator::evaluate(const pcl::PointXYZ& point) const {
